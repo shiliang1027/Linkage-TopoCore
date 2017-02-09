@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="180"
+						 minWidth="180"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false"
+						 title="告警渲染配置">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.controller.event.CanvasEvent;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.AlarmConstants;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+			import com.linkage.system.structure.map.ISet;
+			import com.linkage.system.structure.map.Map;
+			import com.linkage.system.structure.map.Set;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.AlarmRendererConfigPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 共享对象
+			private var _mySharedObject:SharedObject;
+
+			// 参数
+			private var _alarmTypes:ISet = new Set();
+			private var _alarmLevels:ISet = new Set();
+
+			// ----------- 当前值 ------------
+			[Bindable]
+			private var alarmType1_selected:Boolean = false;
+			[Bindable]
+			private var alarmType2_selected:Boolean = false;
+			[Bindable]
+			private var alarmType3_selected:Boolean = false;
+
+			[Bindable]
+			private var alarmLevel1_selected:Boolean = false;
+			[Bindable]
+			private var alarmLevel2_selected:Boolean = false;
+			[Bindable]
+			private var alarmLevel3_selected:Boolean = false;
+			[Bindable]
+			private var alarmLevel4_selected:Boolean = false;
+
+			// 初始化面板
+			override public function initPanel():void
+			{
+				readConfig();
+			}
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				_topoCanvas.addEventListener(TopoEvent.ALARM_RENDERER_CONFIG, function(event:TopoEvent):void
+					{
+						if (showStatus)
+						{
+							closePanel();
+						}
+						else
+						{
+							showPanel();
+						}
+					});
+			}
+
+			// 展示元素的信息
+			private function showPanel():void
+			{
+				show();
+			}
+
+
+			// 从本地读取配置
+			private function readConfig():void
+			{
+				_mySharedObject = SharedObject.getLocal("topo-alarm-renderer-config");
+				var alarmTypes:String = _mySharedObject.data.alarmTypes;
+				if (alarmTypes)
+				{
+					var array1:Array = alarmTypes.split(",");
+					array1.forEach(function(type:String, index:int, array:Array):void
+						{
+							_alarmTypes.add(uint(type));
+						});
+				}
+				else
+				{
+					initDefaultAlarmTypes();
+				}
+				var alarmLevels:String = _mySharedObject.data.alarmLevels;
+				if (alarmLevels)
+				{
+					var array2:Array = alarmLevels.split(",");
+					array2.forEach(function(type:String, index:int, array:Array):void
+						{
+							_alarmLevels.add(uint(type));
+						});
+				}
+				else
+				{
+					initDefaultAlarmLevels();
+				}
+				log.debug("读取本地告警渲染的配置: alarmTypes = {0} alarmLevels = {1}", _alarmTypes, _alarmLevels);
+				alarmType1_selected = _alarmTypes.contains(AlarmConstants.ALARM_TYPE_DEVICE);
+				alarmType2_selected = _alarmTypes.contains(AlarmConstants.ALARM_TYPE_PERFORMANCE);
+				alarmType3_selected = _alarmTypes.contains(AlarmConstants.ALARM_TYPE_BUSINESS);
+
+				alarmLevel1_selected = _alarmLevels.contains(AlarmConstants.LEVEL1);
+				alarmLevel2_selected = _alarmLevels.contains(AlarmConstants.LEVEL2);
+				alarmLevel3_selected = _alarmLevels.contains(AlarmConstants.LEVEL3);
+				alarmLevel4_selected = _alarmLevels.contains(AlarmConstants.LEVEL4);
+
+				publishEvent();
+			}
+
+			private function initDefaultAlarmTypes():void
+			{
+				_alarmTypes.add(AlarmConstants.ALARM_TYPE_DEVICE);
+				_alarmTypes.add(AlarmConstants.ALARM_TYPE_PERFORMANCE);
+				_alarmTypes.add(AlarmConstants.ALARM_TYPE_BUSINESS);
+			}
+
+			private function initDefaultAlarmLevels():void
+			{
+				_alarmLevels.add(AlarmConstants.LEVEL1);
+				_alarmLevels.add(AlarmConstants.LEVEL2);
+				_alarmLevels.add(AlarmConstants.LEVEL3);
+				_alarmLevels.add(AlarmConstants.LEVEL4);
+			}
+
+			// 配置信息写入磁盘
+			private function writeConfig():void
+			{
+				_mySharedObject.data.alarmTypes = _alarmTypes.toArray().join(",");
+				_mySharedObject.data.alarmLevels = _alarmLevels.toArray().join(",");
+
+				var flushStatus:String = null;
+				try
+				{
+					flushStatus = _mySharedObject.flush(100);
+				}
+				catch (error:Error)
+				{
+					log.error("写入本地告警渲染配置时异常: {0} StackTrace:{1}", error.name, error.getStackTrace());
+				}
+				if (flushStatus != null)
+				{
+					switch (flushStatus)
+					{
+						case SharedObjectFlushStatus.PENDING:
+							break;
+						case SharedObjectFlushStatus.FLUSHED:
+							break;
+					}
+				}
+				log.debug("写入本地告警渲染配置后 flushStatus: {0}", flushStatus);
+			}
+
+			// 告警类型切换
+			private function alarmType_clickHandler(type:uint, selected:Boolean):void
+			{
+				if (selected)
+				{
+					_alarmTypes.add(type);
+				}
+				else
+				{
+					_alarmTypes.remove(type);
+				}
+				// 数据保存在本地
+				writeConfig();
+				publishEvent();
+			}
+
+			// 告警级别切换
+			private function alarmLevel_clickHandler(level:uint, selected:Boolean):void
+			{
+				if (selected)
+				{
+					_alarmLevels.add(level);
+				}
+				else
+				{
+					_alarmLevels.remove(level);
+				}
+				// 数据保存在本地
+				writeConfig();
+				publishEvent();
+			}
+
+			// 发布事件
+			private function publishEvent():void
+			{
+				// 发布事件
+				var properties:IMap = new Map();
+				properties.put(AlarmConstants.KEY_ALARM_TYPES, _alarmTypes);
+				properties.put(AlarmConstants.KEY_ALARM_LEVELS, _alarmLevels);
+				_topoCanvas.dispatchEvent(new CanvasEvent(CanvasEvent.ALARM_RENDERER_CHANGE, null, properties));
+			}
+
+			private function submit_clickHandler(event:MouseEvent):void
+			{
+				_topoCanvas.dispatchEvent(new CanvasEvent(CanvasEvent.ALARM_RENDERER_CHANGE_REFRESH));
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup gap="10"
+			  width="100%">
+		<s:Label text="告警类别"
+				 fontWeight="bold"/>
+		<s:HGroup width="100%"
+				  gap="10">
+			<s:CheckBox id="alarmType1"
+						label="设备告警"
+						selected="{alarmType1_selected}"
+						click="alarmType_clickHandler(1,alarmType1.selected)"/>
+			<s:CheckBox id="alarmType2"
+						label="性能告警"
+						selected="{alarmType2_selected}"
+						click="alarmType_clickHandler(2,alarmType2.selected)"/>
+		</s:HGroup>
+		<s:HGroup width="100%"
+				  gap="10">
+			<s:CheckBox id="alarmType3"
+						label="业务质量告警"
+						selected="{alarmType3_selected}"
+						click="alarmType_clickHandler(3,alarmType3.selected)"/>
+		</s:HGroup>
+		<s:Label text="告警级别"
+				 fontWeight="bold"/>
+		<s:HGroup width="100%"
+				  gap="10">
+			<s:CheckBox id="alarmLevel1"
+						label="一级告警"
+						selected="{alarmLevel1_selected}"
+						click="alarmLevel_clickHandler(1,alarmLevel1.selected)"/>
+			<s:CheckBox id="alarmLevel2"
+						label="二级告警"
+						selected="{alarmLevel2_selected}"
+						click="alarmLevel_clickHandler(2,alarmLevel2.selected)"/>
+		</s:HGroup>
+		<s:HGroup width="100%"
+				  gap="10">
+			<s:CheckBox id="alarmLevel3"
+						label="三级告警"
+						selected="{alarmLevel3_selected}"
+						click="alarmLevel_clickHandler(3,alarmLevel3.selected)"/>
+			<s:CheckBox id="alarmLevel4"
+						label="四级告警"
+						selected="{alarmLevel4_selected}"
+						click="alarmLevel_clickHandler(4,alarmLevel4.selected)"/>
+		</s:HGroup>
+		<s:HGroup width="100%"
+				  gap="10"
+				  horizontalAlign="center">
+			<s:Button label="应 用"
+					  buttonMode="true"
+					  click="submit_clickHandler(event)"/>
+		</s:HGroup>
+	</s:VGroup>
+</panel:AbstractCEPWindow>

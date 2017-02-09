@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow title="业务扩展属性"
+						 xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 width="550"
+						 minHeight="24"
+						 close="closePanel()"
+						 maximizable="false">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.Feature;
+			import com.linkage.module.topo.framework.core.model.element.IElement;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.component.panel.events.WindowEvent;
+			import com.linkage.system.structure.map.IMap;
+			import com.linkage.system.utils.StringUtils;
+
+			import mx.containers.FormItem;
+			import mx.controls.Image;
+			import mx.events.FlexEvent;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+
+			import spark.components.TextInput;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.ElementPropertyConfigPanel");
+
+			// 属性Array {key:'',value:''}
+			private var _properties:Array = [];
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 编辑属性的对象
+			private var _element:IElement = null;
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+
+				_topoCanvas.addEventListener(TopoEvent.CONFIG_PROPERTY, function(event:TopoEvent):void
+					{
+						showPanel(event.feature);
+					});
+			}
+
+
+			// 展示元素的信息
+			private function showPanel(feature:Feature):void
+			{
+				show();
+				
+				body.removeAllChildren();
+				_properties.length = 0;
+				if (feature)
+				{
+					_element = feature.element;
+					_element.eachExtendProperty(function(key:String, value:String):void
+						{
+							addPropertyShow(key, value);
+						});
+				}
+			}
+
+			private function addPropertyShow(key:String, value:String, enabled:Boolean = true):void
+			{
+				var hbox:HBox = new HBox();
+				hbox.percentWidth = 100;
+				// 属性
+				var formItemkey:FormItem = new FormItem();
+				formItemkey.label = "属性：";
+				var keyInput:TextInput = new TextInput();
+				keyInput.width = 150;
+				keyInput.enabled = enabled;
+				keyInput.text = key;
+				formItemkey.addChild(keyInput);
+				// 值
+				var formItemvalue:FormItem = new FormItem();
+				formItemvalue.label = "值：";
+				var valueInput:TextInput = new TextInput();
+				valueInput.width = 200;
+				valueInput.text = value;
+				formItemvalue.addChild(valueInput);
+				var formItemBtn:FormItem = new FormItem();
+				// 删除图标
+				var image:Image = new Image();
+				image.source = TopoIcons.delIcon;
+				image.buttonMode = true;
+				image.addEventListener(MouseEvent.CLICK, function(event:MouseEvent):void
+					{
+						body.removeChild(hbox);
+						_properties.some(function(property:Object, index:int, array:Array):Boolean
+							{
+								if (property.key == keyInput)
+								{
+									_properties.splice(index, 1);
+									return true;
+								}
+								else
+								{
+									return false;
+								}
+							});
+					});
+				formItemBtn.addChild(image);
+				// 拼成一行
+
+				hbox.addChild(formItemkey);
+				hbox.addChild(formItemvalue);
+				hbox.addChild(formItemBtn);
+				body.addChild(hbox);
+				_properties.push({key: keyInput, value: valueInput});
+			}
+
+			// 新增属性事件捕获
+			private function add_clickHandler(event:MouseEvent):void
+			{
+				addPropertyShow("", "");
+			}
+
+			// 保存事件捕获
+			private function save_clickHandler(event:MouseEvent):void
+			{
+				// TODO Auto-generated method stub
+				if (_element == null)
+				{
+					throw new Error("目前画布不支持属性编辑,请编辑网元!");
+					return;
+				}
+				_element.clearExtendProperties();
+				_properties.forEach(function(property:Object, index:int, array:Array):void
+					{
+						var key:String = property.key.text;
+						var value:String = property.value.text;
+						if (!StringUtils.isEmpty(key))
+						{
+							_element.addExtendProperty(key, value);
+						}
+					});
+				_element.feature.refresh();
+
+				DataUtil.saveElementExtendProperties(_dataSource, _topoCanvas.topoId, _topoCanvas.topoName, _element, function(map:IMap):void
+					{
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							MessageUtil.showMessage("配置业务属性成功!");
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("配置业务属性失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+					}, function():void
+					{
+					}, function():void
+					{
+						MessageUtil.showMessage("配置业务属性失败!(通信异常)");
+					});
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<mx:Form id="propertysForm"
+			 width="100%" maxHeight="300">
+		<s:Scroller width="100%" height="100%">
+			<s:Group>
+				<mx:VBox id="body"
+						 horizontalAlign="center"/>
+			</s:Group>
+		</s:Scroller>
+		<mx:HBox horizontalAlign="center"
+				 width="100%">
+			<s:Button label="增 加"
+					  buttonMode="true"
+					  click="add_clickHandler(event)">
+			</s:Button>
+			<s:Button label="保 存"
+					  buttonMode="true"
+					  click="save_clickHandler(event)">
+			</s:Button>
+			<s:Button label="关 闭"
+					  click="closePanel()"
+					  buttonMode="true">
+			</s:Button>
+		</mx:HBox>
+	</mx:Form>
+</panel:AbstractCEPWindow>

@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009"
+				   xmlns:s="library://ns.adobe.com/flex/spark"
+				   xmlns:mx="library://ns.adobe.com/flex/mx"
+				   height="24"
+				   maxWidth="{MAX_WIDTH}"
+				   styleName="panelStyle">
+	<s:layout>
+		<s:VerticalLayout/>
+	</s:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.CanvasEvent;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.utils.StringUtils;
+			
+			import mx.collections.ArrayCollection;
+			
+			import spark.events.IndexChangeEvent;
+
+			// log
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.navigation.Navigation");
+			// 导航的路径
+			private var _navPaths:Array = [];
+			private var _navWidths:Array = [];
+			// 最终显示的导航路径
+			[Bindable]
+			private var _navShowPaths:ArrayCollection = new ArrayCollection();
+			// 画布
+			private var _topoCanvas:TopoCanvas = null;
+
+			// 最大宽度
+			private static const MAX_WIDTH:Number = 600;
+			// 导航最大宽度 (20是最前面和最后面的样式10的宽度)
+			private static const NAV_MAX_WIDTH:Number = MAX_WIDTH - 20;
+			// 箭头 "<<" , ">>" 的宽度
+			private static const ARROW_WIDTH:Number = 30;
+
+			// 对应 "<<" 的id
+			private static const NAV_PREV_ID:String = "NAV_PREV_ID";
+			// 对应 ">>" 的id
+			private static const NAV_NEXT_ID:String = "NAV_NEXT_ID";
+			// 路径的分隔符
+			private static const PATH_SPLIT:String = "@_@";
+
+			private var navShowFirstIndex:int = 0;
+			private var navShowLastIndex:int = 0;
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+
+				_topoCanvas.addEventListener(CanvasEvent.LAYER_CHANGED, function(event:CanvasEvent):void
+					{
+						initNavigationPaths();
+					});
+			}
+
+			/**
+			 * 显示
+			 */
+			public function show():void
+			{
+				this.visible = true;
+			}
+
+			/**
+			 * 隐藏
+			 */
+			public function hide():void
+			{
+				this.visible = false;
+			}
+
+			// 初始化导航的路径
+			private function initNavigationPaths():void
+			{
+				var path:String = _topoCanvas.getProperty(Constants.XML_KEY_PATH);
+				var pathPid:String = _topoCanvas.getProperty(Constants.XML_KEY_PATHPID);
+				var topoName:String = _topoCanvas.topoName;
+				if (StringUtils.isEmpty(path) || StringUtils.isEmpty(pathPid))
+				{
+					log.error("此拓扑数据中没有 {0}, {1} 两个属性", Constants.XML_KEY_PATH, Constants.XML_KEY_PATHPID);
+					return;
+				}
+
+				var pathArray:Array = path.split(PATH_SPLIT);
+				var pathPidArray:Array = pathPid.split(PATH_SPLIT);
+
+				var pathNum:uint = pathArray.length;
+				if (pathPidArray.length != pathNum)
+				{
+					log.error("导航路径名称和路径pid数量不对应! {0}  {1}", path, pathPid);
+					return;
+				}
+				_navPaths.length = 0
+				_navWidths.length = 0;
+				if (pathNum == 0)
+				{
+					log.error("导航路径数量为0!");
+					return;
+				}
+
+				var fontSize:Number = this.getStyle("fontSize");
+				for (var i:uint = 0; i < pathNum; i++)
+				{
+					var pid:String = pathPidArray[i];
+					var name:String = pathArray[i];
+					var nameWidth:Number = StringUtils.getStrLen(name) * fontSize / 2;
+					if (i != pathNum - 1)
+					{
+						// 不是最后一个,name中要加上 ->
+						name += " ->";
+						nameWidth += 25;
+					}
+					// 加上前后各12.5的样式距离
+					nameWidth += 25;
+					_navWidths.push(nameWidth);
+					// TODO:  topoName 暂时先使用 "",待完善
+					_navPaths.push({label: name, id: pid, topoName: topoName, disabled: true});
+				}
+
+				// ==== 下面构造哪些需要展示 ====
+				_navShowPaths.removeAll();
+
+				var totalWidth:Number = 0;
+				var len:int = _navPaths.length;
+				navShowLastIndex = len - 1;
+				for (var j:int = len - 1; j >= 0; j--)
+				{
+					var pathObj:Object = _navPaths[j];
+					var textWidth:Number = _navWidths[j];
+					totalWidth += textWidth;
+					if (totalWidth + ARROW_WIDTH > NAV_MAX_WIDTH)
+					{
+						// 当前节点已经越界,取当前点之后的展示
+						addPrevArrow();
+						break;
+					}
+					// 每次添加放在第一位置
+					_navShowPaths.addItemAt(pathObj, 0);
+					navShowFirstIndex = j;
+				}
+
+				navigationBar.selectedIndex = _navShowPaths.length - 1;
+			}
+
+			// 添加向前的箭头
+			private function addPrevArrow():void
+			{
+				_navShowPaths.addItemAt({label: "<<", id: NAV_PREV_ID, disabled: true}, 0);
+			}
+
+			// 添加向后的箭头
+			private function addNextArrow():void
+			{
+				_navShowPaths.addItem({label: ">>", id: NAV_NEXT_ID, disabled: true});
+			}
+
+			// 捕获导航切换
+			private function buttonbar_changeHandler(event:IndexChangeEvent):void
+			{
+				log.debug("切换导航路径 {0} -> {1}  now:{2}", event.oldIndex, event.newIndex);
+				var index:int = event.newIndex == -1 ? event.oldIndex : event.newIndex;
+				var path:Object = _navShowPaths.getItemAt(index);
+				// 如果是第一个,并且id为start,需要展现前面的路径
+				// 如果是最后一个,并且id为end,需要展现后面的路径
+				// 否则直接定位
+				switch (path.id)
+				{
+					case NAV_PREV_ID:
+						showPrevNavPath();
+						break;
+					case NAV_NEXT_ID:
+						showNextNavPath();
+						break;
+					default:
+						_topoCanvas.loadTopo(path.id, path.topoName);
+						break;
+				}
+			}
+
+			// 显示前一个导航
+			private function showPrevNavPath():void
+			{
+				log.debug("显示前一个导航");
+				navShowFirstIndex--;
+				_navShowPaths.removeAll();
+
+				var maxWidth:Number = NAV_MAX_WIDTH;
+				if (navShowFirstIndex != 0)
+				{
+					// 前面还是有对象,需要向前的箭头
+					addPrevArrow();
+					maxWidth -= ARROW_WIDTH;
+				}
+
+				var len:int = _navPaths.length;
+				var totalWidth:Number = 0;
+				for (var i:int = navShowFirstIndex; i < len; i++)
+				{
+					var pathObj:Object = _navPaths[i];
+					var textWidth:Number = _navWidths[i];
+					totalWidth += textWidth;
+
+					if (totalWidth + ARROW_WIDTH > maxWidth)
+					{
+						// 当前节点已经越界,取当前点之后的展示
+						addNextArrow();
+						break;
+					}
+					// 每次添加到后面位置
+					_navShowPaths.addItem(pathObj);
+					navShowLastIndex = i;
+				}
+			}
+
+			// 显示后一个导航
+			private function showNextNavPath():void
+			{
+				log.debug("显示后一个导航");
+				navShowLastIndex++;
+				_navShowPaths.removeAll();
+
+				var len:int = _navPaths.length;
+				var maxWidth:Number = NAV_MAX_WIDTH;
+				if (navShowLastIndex < len - 1)
+				{
+					// 后面还是有对象,需要向后的箭头
+					addNextArrow();
+					maxWidth -= ARROW_WIDTH;
+				}
+
+				var totalWidth:Number = 0;
+				for (var i:int = navShowLastIndex; i >= 0; i--)
+				{
+					var pathObj:Object = _navPaths[i];
+					var textWidth:Number = _navWidths[i];
+					totalWidth += textWidth;
+
+					if (totalWidth + ARROW_WIDTH > maxWidth)
+					{
+						// 当前节点已经越界,取当前点之后的展示
+						addPrevArrow();
+						break;
+					}
+					// 每次添加到前面位置
+					_navShowPaths.addItemAt(pathObj, 0);
+					navShowFirstIndex = i;
+				}
+			}
+		]]>
+	</fx:Script>
+	<s:ButtonBar id="navigationBar"
+				 width="100%"
+				 styleName="navigationBar"
+				 dataProvider="{_navShowPaths}"
+				 change="buttonbar_changeHandler(event)"/>
+</s:BorderContainer>

@@ -1,0 +1,521 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="340"
+						 title="{_title}"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.plane.HLinkLayer;
+			import com.linkage.module.topo.framework.core.model.element.plane.IHLinkLayer;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.module.topo.framework.view.component.panel.spareparts.TopoTreeChooser;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.HLinkLayerModifyPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 正在编辑的缩略图对象(为空代表新增)
+			private var _modifyHLinkLayer:IHLinkLayer = null;
+
+			// 缩略图创建的位置
+			private var _creationPoint:Point = new Point();
+
+			// 获取数据的拓扑id
+			private var _sourceId:String = null;
+			// 获取数据的拓扑名称
+			[Bindable]
+			private var _sourceName:String = null;
+			// 获取数据的拓扑数据源
+			private var _sourceTopoName:String = null;
+
+			// 拓扑选择面板
+			private var _topoChooser:TopoTreeChooser = null;
+
+			// ------ 当前值 -----
+			[Bindable]
+			private var _currentShadowEnable:Boolean = true;
+			[Bindable]
+			private var _currentParallelogramAngle:Number = 0;
+
+
+			// 初始化面板
+			override public function initPanel():void
+			{
+				currentState = "rectangleState";
+			}
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				_topoCanvas.addEventListener(TopoEvent.CREATE_HLINKLAYER, function(event:TopoEvent):void
+					{
+						showPanel(event);
+					});
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_HLINKLAYER, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as IHLinkLayer);
+					});
+			}
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, hlinkLayer:IHLinkLayer = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开缩略图面板,开始初始化...");
+					_topoChooser = new TopoTreeChooser();
+					_topoChooser.topoCanvas = _topoCanvas;
+					_topoChooser.dataSource = _dataSource;
+					// 网段选择面板选中具体树节点
+					_topoChooser.initPanel(function(selectedItem:Object):void
+						{
+							_sourceId = selectedItem.@id;
+							_sourceName = selectedItem.@name;
+							_sourceTopoName = selectedItem.@toponame;
+							// 显示的名称默认使用指向网段的名称
+							hlinkLayerName.text = _sourceName;
+							_topoChooser.hide();
+						});
+				}
+				_modifyHLinkLayer = hlinkLayer;
+				if (_modifyHLinkLayer)
+				{
+					_title = "编辑缩略图";
+					hlinkLayerWidth.text = String(_modifyHLinkLayer.width);
+					hlinkLayerHeight.text = String(_modifyHLinkLayer.height);
+					hlinkLayerName.text = _modifyHLinkLayer.name;
+					_sourceId = _modifyHLinkLayer.sourceId;
+					_sourceName = _modifyHLinkLayer.sourceName;
+					setLabelLayoutProperty(_modifyHLinkLayer.labelLayout);
+					setShapeTypeProperty(_modifyHLinkLayer.shapeType);
+					_currentParallelogramAngle = _modifyHLinkLayer.parallelogramAngle;
+					fillColorStart.selectedColor = _modifyHLinkLayer.fillColorStart;
+					fillColorEnd.selectedColor = _modifyHLinkLayer.fillColorEnd;
+					fillAlpha.value = _modifyHLinkLayer.fillAlpha;
+					borderWidth.value = _modifyHLinkLayer.borderWidth;
+					borderColor.selectedColor = _modifyHLinkLayer.borderColor;
+					borderAlpha.value = _modifyHLinkLayer.borderAlpha;
+					_currentShadowEnable = _modifyHLinkLayer.shadowEnable == 1 ? true : false;
+				}
+				else
+				{
+					_title = "创建缩略图";
+					_creationPoint.x = event.getProperty("x");
+					_creationPoint.y = event.getProperty("y");
+					hlinkLayerWidth.text = event.getProperty("width");
+					hlinkLayerHeight.text = event.getProperty("height");
+					hlinkLayerName.text = "";
+					_sourceId = "";
+					_sourceName = "";
+					setLabelLayoutProperty(ElementProperties.DEFAULT_LABEL_LAYOUT);
+					setShapeTypeProperty(ElementProperties.DEFAULT_SHAPE_TYPE);
+					_currentParallelogramAngle = ElementProperties.DEFAULT_SHAPE_PARALLELOGRAM_ANGLE;
+					fillColorStart.selectedColor = ElementProperties.DEFAULT_SHAPE_FILL_COLOR_START;
+					fillColorEnd.selectedColor = ElementProperties.DEFAULT_SHAPE_FILL_COLOR_END;
+					fillAlpha.value = ElementProperties.DEFAULT_SHAPE_FILL_ALPHA;
+					borderWidth.value = ElementProperties.DEFAULT_SHAPE_BORDER_WIDTH;
+					borderColor.selectedColor = ElementProperties.DEFAULT_SHAPE_BORDER_COLOR;
+					borderAlpha.value = ElementProperties.DEFAULT_SHAPE_BORDER_ALPHA;
+					_currentShadowEnable = ElementProperties.DEFAULT_SHAPE_SHADOW_ENABLE == 1 ? true : false;
+				}
+			}
+
+			// 设置Label布局位置
+			private function setLabelLayoutProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_TOP:
+						labelLayout.selectedIndex = 0;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_LEFT:
+						labelLayout.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_RIGHT:
+						labelLayout.selectedIndex = 3;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_HIDE:
+						labelLayout.selectedIndex = 4;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_BOTTOM:
+					default:
+						labelLayout.selectedIndex = 1;
+						break;
+				}
+			}
+
+			// 设置形状类型的属性值
+			private function setShapeTypeProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_SHAPE_TYPE_PARALLELOGRAM:
+						shapeType.selectedIndex = 1;
+						break;
+					case ElementProperties.PROPERTYVALUE_SHAPE_TYPE_TRAPEZIUM:
+						shapeType.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_SHAPE_TYPE_RECTANGLE:
+					default:
+						shapeType.selectedIndex = 0;
+						break;
+				}
+				shapeType_changeHandler();
+			}
+
+			// 捕获形状类型切换
+			private function shapeType_changeHandler():void
+			{
+				if (shapeType.selectedItem.value == ElementProperties.PROPERTYVALUE_SHAPE_TYPE_RECTANGLE)
+				{
+					// 切换到矩形视图
+					currentState = "rectangleState";
+				}
+				else
+				{
+					// 切换到平行四边形或者梯形视图
+					currentState = "parallelogramState";
+				}
+			}
+
+			// 查找网段按钮click事件
+			private function findSegment_clickHandler():void
+			{
+				_topoChooser.show(_topoCanvas, true);
+			}
+
+			// 保存按钮点击
+			private function save_clickHandler(event:MouseEvent):void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyHLinkLayer)
+				{
+					saveModify(_modifyHLinkLayer);
+				}
+				else
+				{
+					saveCreate();
+				}
+			}
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+				// 检查验证器是否通过
+				return TopoUtil.checkValidators([topoIdValidator, nameValidator, widthValidator, heightValidator]);
+			}
+
+
+			// 新创建后保存
+			private function saveCreate():void
+			{
+				var hlinkLayer:IHLinkLayer = new HLinkLayer();
+				hlinkLayer.visible = 1;
+				hlinkLayer.zindex = -1;
+				hlinkLayer.x = _creationPoint.x - _topoCanvas.dataBounds.offsetX;
+				hlinkLayer.y = _creationPoint.y - _topoCanvas.dataBounds.offsetY;
+				commitFormProperties(hlinkLayer);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([hlinkLayer], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_OBJECT, data);
+				log.debug("saveCreate: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("创建缩略图失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建缩略图失败!(通信异常)");
+					});
+			}
+
+			// 修改后保存
+			private function saveModify(hlinkLayer:IHLinkLayer):void
+			{
+				commitFormProperties(hlinkLayer);
+				// 元素变化后,要同步更新样式
+				hlinkLayer.feature.style = _topoCanvas.styleFactory.buildStyle(hlinkLayer);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([hlinkLayer], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [hlinkLayer.id]);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							hlinkLayer.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改缩略图失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改缩略图失败!(通信异常)");
+					});
+			}
+
+			// 提交页面上的属性到缩略图对象中
+			private function commitFormProperties(hlinkLayer:IHLinkLayer):void
+			{
+				hlinkLayer.name = StringUtil.trim(hlinkLayerName.text);
+				hlinkLayer.labelLayout = labelLayout.selectedItem.value;
+				hlinkLayer.width = int(hlinkLayerWidth.text);
+				hlinkLayer.height = int(hlinkLayerHeight.text);
+				// 下面是扩展属性
+				hlinkLayer.shapeType = shapeType.selectedItem.value;
+				if (parallelogramAngle)
+				{
+					hlinkLayer.parallelogramAngle = parallelogramAngle.value;
+				}
+				hlinkLayer.fillColorStart = fillColorStart.selectedColor;
+				hlinkLayer.fillColorEnd = fillColorEnd.selectedColor;
+				hlinkLayer.fillAlpha = fillAlpha.value;
+				hlinkLayer.borderColor = borderColor.selectedColor;
+				hlinkLayer.borderWidth = borderWidth.value;
+				hlinkLayer.borderAlpha = borderAlpha.value;
+				hlinkLayer.shadowEnable = shadowEnable.selected ? 1 : 0;
+				// 拓扑跳转属性
+				hlinkLayer.sourceId = _sourceId;
+				hlinkLayer.sourceName = _sourceName;
+				hlinkLayer.sourceTopoName = _sourceTopoName;
+				hlinkLayer.linkId = _sourceId;
+				hlinkLayer.linkName = _sourceName;
+				hlinkLayer.linkTopoName = _sourceTopoName;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<mx:Validator id="topoIdValidator"
+					  source="{sourceName}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请选择云图"/>
+		<mx:Validator id="nameValidator"
+					  source="{hlinkLayerName}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请输入名称"/>
+		<mx:NumberValidator id="widthValidator"
+							source="{hlinkLayerWidth}"
+							property="text"
+							allowNegative="false"
+							domain="int"
+							minValue="1"/>
+		<mx:NumberValidator id="heightValidator"
+							source="{hlinkLayerHeight}"
+							property="text"
+							allowNegative="false"
+							domain="int"
+							minValue="1"/>
+
+	</fx:Declarations>
+	<mx:Form width="100%">
+		<mx:FormItem label="对应云图">
+			<s:HGroup gap="10">
+				<s:TextInput id="sourceName"
+							 width="120"
+							 text="{_sourceName}"
+							 editable="false"/>
+				<mx:Image source="{TopoIcons.searchIcon}"
+						  toolTip="查找云图"
+						  buttonMode="true"
+						  click="findSegment_clickHandler()"/>
+			</s:HGroup>
+		</mx:FormItem>
+		<mx:FormItem label="名称">
+			<s:TextInput id="hlinkLayerName"
+						 width="120"/>
+		</mx:FormItem>
+		<mx:FormItem label="名称位置">
+			<s:DropDownList id="labelLayout"
+							width="120"
+							selectedIndex="0">
+				<s:dataProvider>
+					<s:ArrayList>
+						<fx:Object label="顶部"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_TOP}"/>
+						<fx:Object label="底部"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_BOTTOM}"/>
+						<fx:Object label="左侧"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_LEFT}"/>
+						<fx:Object label="右侧"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_RIGHT}"/>
+						<fx:Object label="隐藏"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_HIDE}"/>
+					</s:ArrayList>
+				</s:dataProvider>
+			</s:DropDownList>
+		</mx:FormItem>
+		<mx:FormItem label="宽度">
+			<s:TextInput id="hlinkLayerWidth"
+						 width="120"/>
+		</mx:FormItem>
+		<mx:FormItem label="高度">
+			<s:TextInput id="hlinkLayerHeight"
+						 width="120"/>
+		</mx:FormItem>
+		<mx:FormItem label="形状">
+			<s:DropDownList id="shapeType"
+							width="120"
+							selectedIndex="0"
+							change="shapeType_changeHandler()">
+				<s:dataProvider>
+					<s:ArrayList>
+						<fx:Object label="矩形"
+								   value="{ElementProperties.PROPERTYVALUE_SHAPE_TYPE_RECTANGLE}"/>
+						<fx:Object label="平行四边形"
+								   value="{ElementProperties.PROPERTYVALUE_SHAPE_TYPE_PARALLELOGRAM}"/>
+						<fx:Object label="梯形"
+								   value="{ElementProperties.PROPERTYVALUE_SHAPE_TYPE_TRAPEZIUM}"/>
+					</s:ArrayList>
+				</s:dataProvider>
+			</s:DropDownList>
+		</mx:FormItem>
+		<mx:FormItem excludeFrom="rectangleState"
+					 label="倾斜角">
+			<s:NumericStepper id="parallelogramAngle"
+							  toolTip="范围: -45 -- 45"
+							  width="120"
+							  maxChars="3"
+							  maximum="45"
+							  minimum="-45"
+							  stepSize="5"
+							  snapInterval="5"
+							  allowValueWrap="false"
+							  value="{_currentParallelogramAngle}"/>
+		</mx:FormItem>
+		<mx:FormItem label="填充色">
+			<s:HGroup gap="20">
+				<mx:ColorPicker id="fillColorStart"/>
+				<mx:ColorPicker id="fillColorEnd"/>
+			</s:HGroup>
+		</mx:FormItem>
+		<mx:FormItem label="填充色透明度">
+			<s:HSlider id="fillAlpha"
+					   width="120"
+					   minimum="0"
+					   maximum="1"
+					   stepSize="0.1"/>
+		</mx:FormItem>
+		<mx:FormItem label="边框粗细">
+			<s:NumericStepper id="borderWidth"
+							  toolTip="范围: 0 -- 20"
+							  width="120"
+							  maxChars="3"
+							  maximum="20"
+							  minimum="0"
+							  stepSize="1"
+							  allowValueWrap="false"/>
+		</mx:FormItem>
+		<mx:FormItem label="边框颜色">
+			<mx:ColorPicker id="borderColor"/>
+		</mx:FormItem>
+		<mx:FormItem label="边框透明度">
+			<s:HSlider id="borderAlpha"
+					   width="120"
+					   minimum="0"
+					   maximum="1"
+					   stepSize="0.1"/>
+		</mx:FormItem>
+		<mx:FormItem label="阴影效果">
+			<s:CheckBox id="shadowEnable"
+						label="启用阴影"
+						selected="{_currentShadowEnable}"/>
+		</mx:FormItem>
+		<s:HGroup width="100%"
+				  horizontalAlign="center"
+				  gap="20">
+			<s:Button id="submitBtn"
+					  label="确 定"
+					  click="save_clickHandler(event)"/>
+			<s:Button label="关 闭"
+					  click="closePanel();"/>
+		</s:HGroup>
+	</mx:Form>
+	<!-- 视图状态 -->
+	<panel:states>
+		<s:State name="parallelogramState"/>
+		<s:State name="rectangleState"/>
+	</panel:states>
+</panel:AbstractCEPWindow>

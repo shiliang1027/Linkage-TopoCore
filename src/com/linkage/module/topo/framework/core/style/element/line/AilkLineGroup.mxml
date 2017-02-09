@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" 
+		 xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 creationComplete="init()">
+	<fx:Script>
+		<![CDATA[
+			import mx.controls.Image;
+			import mx.effects.Resize;
+			import mx.events.EffectEvent;
+			import spark.components.Group;
+			[Bindable] 
+			public var _startX:Number = 0;
+			[Bindable] 
+			public var _startY:Number = 0;
+			[Bindable] 
+			public var _width:Number;
+			[Bindable] 
+			public var _height:Number;
+			
+			[Bindable] 
+			public var imageSouce:Class;
+			
+			
+			
+			
+			//流动方向(up/down/left/right)
+			public var direction:String = "right";
+			//流动长度
+//			public var length:Number = 500;
+			//当为up/down时，group宽度为iconWidth。
+			private var iconWidth:Number = 18;
+			private var iconHeight:Number = 14;
+			
+			
+			
+			[Bindable]  
+			[Embed(source="images/point/point_bg.png")]  
+			private var hor_bg:Class;
+
+				
+			[Bindable]  
+			[Embed(source="images/point/point_left2.png")]  
+			private var hor_right:Class;
+
+			[Bindable]   
+			[Embed(source="images/point/point_left2.png")]  
+			private var hor_left:Class;
+			[Bindable]  
+			[Embed(source="images/point/point_left2.png")]  
+			private var hor_down:Class;
+			[Bindable]  
+			[Embed(source="images/point/point_left2.png")]  
+			private var hor_up:Class;
+			
+			[Bindable]
+			private var lengthDir:Number = 0;
+			
+			private var image:Image;
+			private var arrCount:int = 0;
+			private var isHor:Boolean = true;
+			protected function init():void
+			{
+				//1.画图
+				this.moveTo();
+				//2.滚动
+				this.moving();
+			}
+			
+			private function moveTo():void
+			{
+				if(direction=="up"){
+					_width = iconWidth;
+					_height = this.width;
+					imageSouce = hor_up;
+				}else if(direction=="down"){
+					_width = iconWidth;
+					_height = this.width;
+					imageSouce = hor_down;
+				}else if(direction=="left"){
+					_width = this.width;
+					_height = iconHeight;
+					imageSouce = hor_left;
+				}else if(direction=="right"){
+					_width = this.width;
+					_height = iconHeight;
+					imageSouce = hor_right;
+				}
+			}
+			private function moving(event:EffectEvent=null):void
+			{
+				var resize:Resize = new Resize();
+				resize.addEventListener(EffectEvent.EFFECT_END,moving);
+				resize.duration = 2000;
+				if(direction=="up"){
+					_width = iconWidth;
+					_height = this.width;
+				}else if(direction=="down"){
+					_width = iconWidth;
+					_height = this.width;
+				}else if(direction=="left"){
+					resize.widthFrom = this.width;
+					resize.widthBy = -this.width;
+					resize.heightFrom = 14;
+					resize.heightTo = 14;
+					resize.target = viewLine;
+					resize.play();
+				}else if(direction=="right"){
+					resize.widthFrom = 0;
+					resize.widthBy = this.width;
+					resize.heightFrom = 14;
+					resize.heightTo = 14;
+					resize.target = viewLine;
+					resize.play();
+				}
+			} 
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	
+	<s:Group id="bg" x="{_startX}" y="{_startY -_height/2-1 }" width="{_width}" height="{_height+2}">
+		<s:Group id="viewBg" width="100%" height="100%">
+			<s:Rect  width="100%" height="100%" >
+				<s:fill>
+					<s:BitmapFill id="runBg" source="{hor_bg}" fillMode="repeat" alpha="1"  smooth="true" />
+				</s:fill>
+			</s:Rect>
+		</s:Group>
+	</s:Group>
+	<s:Group id="linerun" x="{_startX}" y="{_startY-_height/2}" width="{_width}" height="{_height}">
+		<s:Group id="viewBgLine" width="100%" height="100%">
+			<s:Rect  width="100%" height="100%" >
+				<s:fill>
+					<s:BitmapFill id="runBgFill" source="{imageSouce}" alpha="0.5" fillMode="repeat"  smooth="true" />
+				</s:fill>
+			</s:Rect>
+		</s:Group>
+		
+		<s:Group id="viewLine" width="100%" height="100%">
+			<s:Rect width="100%" height="100%">
+				<s:fill>
+					<s:BitmapFill id="runFill" source="{imageSouce}"   fillMode="repeat"  smooth="true" />
+				</s:fill>
+			</s:Rect>
+			
+		</s:Group>
+	</s:Group>
+</s:Group>

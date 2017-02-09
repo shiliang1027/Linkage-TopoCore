@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ailk_compts:Window xmlns:fx="http://ns.adobe.com/mxml/2009" 
+		 xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:ailk_compts="http://www.asiainfo-linkage.com.cn/flex/components"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 maximizable="false" 
+		 close="window1_closeHandler(event)"
+		 minimizable="false" visible="{_isopentuli}"
+		 width="100%"  backgroundColor="0xCADAE8"
+		 height="100%" title="图例">
+	<fx:Script>
+		<![CDATA[
+			import com.ailk.common.system.logging.ILogger;
+			import com.ailk.common.system.logging.Log;
+			import com.ailk.common.ui.components.window.standardwindow.event.WindowEvent;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			
+			import flash.text.engine.LigatureLevel;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.XMLListCollection;
+			import mx.controls.Alert;
+			
+			import spark.components.BorderContainer;
+			import spark.components.List;
+			import spark.events.IndexChangeEvent;
+			// log
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.LinkDescPanel");
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 画布
+			[Bindable]
+			private var _desctext:String = null;
+			
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			
+			[Bindable]
+			private var _isopentuli:Boolean = true;
+			[Bindable]
+			private var _pid:String = null;
+			
+			[Bindable]
+			private var normaltext:String = "";
+			[Bindable]
+			private var generaltext:String = "";
+			[Bindable]
+			private var serioustext:String = "";
+			
+			[Bindable]
+			private var manyDesc:Boolean = false;
+			public function set isopentuli(value:Boolean):void
+			{
+				_isopentuli = value;
+			}
+			
+			public function set desc(value:String):void
+			{
+				_desctext = value;
+			}
+			public function set pid(value:String):void
+			{
+				_pid = value;
+			}
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				log.info("LinkDescPanel set topoCanvas");
+				_topoCanvas = value;
+				if(null!=_topoCanvas){				// 新增
+					_topoCanvas.addEventListener(TopoEvent.TopoEvent_LOAD_LINKDESCPANELS, function(event:TopoEvent):void
+					{
+						log.info("LinkDescPanel showPanel！");
+						showPanel(event);
+					});
+				}
+			}
+			[Bindable]
+			private var descList:XMLListCollection;
+			private function showPanel(event:TopoEvent):void
+			{
+				var param:Object = {};
+				param.pid = this._pid;
+				// 查询数据
+				_dataSource.doloadTopoLinkDesc(param, function(data:XML):void
+				{
+					log.info("LinkDescPanel doloadTopoLinkDesc");
+					log.info(data.toString());
+					descList = new XMLListCollection(data.child("desc"));
+					descListDr.selectedIndex=-1;
+					if(descList.length>0){
+						if(descList.length>1){
+							manyDesc = true;
+							descListDr.selectedItem = descList[0];
+//							descList_clickHandler();
+							descListDr.dispatchEvent(new IndexChangeEvent(IndexChangeEvent.CHANGE));
+						}else{
+							var obj:XML = descList[0];
+							_desctext =  "指标：" + obj.@kpiname;//"端口流入/流出带宽利用率"
+							normaltext  = "正      常("+obj.@normal+")";
+							generaltext = "一般拥塞("+obj.@general+")";
+							serioustext = "严重拥塞("+obj.@serious+")";
+							manyDesc = false;
+						}
+					}
+					log.info("LinkDescPanel doloadTopoLinkDesc end!");
+				});
+			}
+			protected function descList_clickHandler():void
+			{
+				var param:XML = descListDr.selectedItem as XML;
+				_desctext =  "指标：" + param.@kpiname;//"端口流入/流出带宽利用率"
+				normaltext  = "正      常("+param.@normal+")";
+				generaltext = "一般拥塞("+param.@general+")";
+				serioustext = "严重拥塞("+param.@serious+")";
+			}
+			protected function window1_closeHandler(event:WindowEvent):void
+			{
+				// TODO Auto-generated method stub
+				this.isopentuli = false;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<s:VGroup gap="10">
+		<mx:Image source="@Embed('img/u339_line.png')"/>
+		<s:Label id="descLab" text="{_desctext}" visible="{!manyDesc}" includeInLayout="{!manyDesc}"/>
+		<s:DropDownList id="descListDr" dataProvider="{descList}" labelField="@kpiname" change="descList_clickHandler()"  width="100%"
+						visible="{manyDesc}" includeInLayout="{manyDesc}"/>
+		<s:HGroup>
+			<mx:Image source="@Embed('img/u331_line.png')"/><s:Label id="normal" text="{normaltext}"/>
+		</s:HGroup>
+		<s:HGroup>
+			<mx:Image source="@Embed('img/u333_line.png')"/><s:Label id="general" text="{generaltext}"/>
+		</s:HGroup>
+		<s:HGroup>
+			<mx:Image source="@Embed('img/u335_line.png')"/><s:Label id="serious" text="{serioustext}"/>
+		</s:HGroup>
+	</s:VGroup>
+</ailk_compts:Window>

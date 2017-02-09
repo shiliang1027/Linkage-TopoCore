@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 xmlns:hawkeye="com.linkage.module.topo.framework.view.component.hawkeye.*"
+		 minWidth="100"
+		 minHeight="80"
+		 creationComplete="creationCompleteHandler()">
+	<s:layout>
+		<s:VerticalLayout/>
+	</s:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.service.core.mo.TopoPath;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.SimpleHawkEyeContainer");
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+			}
+
+			// 切换显示/隐藏的状态
+			public function toggle():void
+			{
+				this.visible = !this.visible;
+			}
+
+			public function show():void
+			{
+				this.visible = true;
+			}
+
+			public function hide():void
+			{
+				this.visible = false;
+			}
+
+			private function creationCompleteHandler():void
+			{
+				addNewPath(new TopoPath(_topoCanvas));
+			}
+
+			// 新增层次
+			private function addNewPath(path:TopoPath):void
+			{
+				var hawkEye:HawkEye = new HawkEye(path);
+				hawkEye.topoCanvas = _topoCanvas;
+				hawkEye.height = this.minHeight;
+				hawkEye.width = this.width;
+				this.addElement(hawkEye);
+				hawkEye.enable();
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+</s:Group>

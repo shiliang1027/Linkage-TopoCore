@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 title="{_title}"
+						 minHeight="24"
+						 width="320"
+						 maximizable="false"
+						 close="closePanel()"
+						 dragable="true">
+	<panel:layout>
+		<s:VerticalLayout verticalAlign="middle"
+						  horizontalAlign="center"/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.PathChangeEvent;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.Feature;
+			import com.linkage.module.topo.framework.core.model.element.IElement;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.service.core.mo.TopoPath;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.module.topo.framework.view.component.panel.spareparts.TopoTreeChooser;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.CreateViewPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			[Bindable]
+			private var _dataSource:IDataSource = null;
+			// 视图所依赖的创建网元
+			private var _viewDependElements:Array = [];
+
+			// ----------------- 选择已有视图 ------------------
+			// 拓扑选择面板
+			private var _topoChooser:TopoTreeChooser = null;
+			private var _selectViewId:String = null;
+			private var _selectViewName:String = null;
+
+			// ----------------- 当前值 ------------------
+			// 新视图名称
+			[Bindable]
+			private var _currentViewName:String = null;
+			// 已有视图名称
+			[Bindable]
+			private var _currentExistViewName:String = null;
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				// 显示创建视图面板
+				_topoCanvas.addEventListener(TopoEvent.CREATE_VIEW, showPanel);
+				// 删除视图
+				_topoCanvas.addEventListener(TopoEvent.DELETE_VIEW, deleteView);
+			}
+
+			// 删除视图
+			private function deleteView(event:TopoEvent):void
+			{
+				MessageUtil.confirm("确认要视图对象[" + _topoCanvas.topoViewName + "]吗?", function():void
+					{
+						var data:String = DataUtil.buildListXML(Constants.XML_KEY_OBJIDS, [_topoCanvas.topoId]);
+						data = DataUtil.buildXML(Constants.TP_MC_REMOVE_TOPOVIEW, data);
+						log.debug("deleteView: {0}", data);
+
+						_loading.loadingStart();
+						_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+							{
+								var map:IMap = DataUtil.getActionResultMap(new XML(result));
+								if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+								{
+									// 将视图那一层从鹰眼中移除
+									_topoCanvas.dispatchEvent(new PathChangeEvent(PathChangeEvent.REMOVE_PATH, new TopoPath(_topoCanvas)));
+									// 视图被删除,要后退到前一层
+									_topoCanvas.loadBackTopo();
+								}
+								else
+								{
+									MessageUtil.showMessage("删除视图失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+								}
+
+							}, function():void
+							{
+								_loading.loadingEnd();
+							}, function():void
+							{
+								MessageUtil.showMessage("删除视图失败!(通信异常)");
+							});
+					});
+			}
+
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开创建视图面板,开始初始化...");
+					_topoChooser = new TopoTreeChooser();
+					_topoChooser.pid = Constants.TOP_PID_VIEW;
+					_topoChooser.showRoot = false;
+					_topoChooser.topoCanvas = _topoCanvas;
+					_topoChooser.dataSource = _dataSource;
+					// 网段选择面板选中具体树节点
+					_topoChooser.initPanel(function(selectedItem:Object):void
+						{
+							_selectViewId = selectedItem.@id;
+							_selectViewName = selectedItem.@name;
+							_currentExistViewName = _selectViewName;
+							_topoChooser.hide();
+						});
+				}
+				isCreateTypeNew(true);
+				_viewDependElements.length = 0;
+				event.features.forEach(function(feature:Feature, index:int, array:Array):void
+					{
+						_viewDependElements.push(feature.element);
+					});
+				_currentViewName = "";
+				_currentExistViewName = "";
+				_title = "创建视图";
+			}
+
+			// 查找视图按钮click事件
+			private function findView_clickHandler():void
+			{
+				_topoChooser.show(_topoCanvas, true);
+			}
+
+			// 创建状态是否为新创建
+			private function isCreateTypeNew(value:Boolean):void
+			{
+				if (value)
+				{
+					createType_new_clickHandler();
+				}
+				else
+				{
+					createType_select_clickHandler();
+				}
+			}
+
+			// 创建状态: 新创建视图 点击事件
+			private function createType_new_clickHandler():void
+			{
+				currentState = "createType_New";
+				createType_new.selected = true;
+			}
+
+			// 创建状态: 选择已有视图 点击事件
+			private function createType_select_clickHandler():void
+			{
+				currentState = "createType_Select";
+				createType_select.selected = true;
+			}
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+				// 检查验证器是否通过
+				switch (currentState)
+				{
+					case "createType_Select":
+						return TopoUtil.checkValidators([existViewValidator]);
+						break;
+					case "createType_New":
+					default:
+						return TopoUtil.checkValidators([nameValidator]);
+						break;
+				}
+			}
+
+
+			// 保存视图
+			private function save_clickHandler():void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+
+				switch (currentState)
+				{
+					case "createType_New":
+						saveCreate();
+						break;
+					case "createType_Select":
+						saveFromSelect();
+						break;
+				}
+			}
+
+			// 创建后保存
+			private function saveCreate():void
+			{
+				var viewNameValue:String = StringUtil.trim(viewName.text);
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_TOPOVIEW_NAME, viewNameValue);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_TOPOVIEW, data);
+				log.debug("saveView: {0}", data);
+
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							var viewId:String = map.get(Constants.XML_KEY_TOPOVIEW_ID);
+							var viewName:String = map.get(Constants.XML_KEY_TOPOVIEW_NAME);
+
+							_viewDependElements.forEach(function(element:IElement, index:int, array:Array):void
+								{
+									saveElementsViewProperty(element, viewId, viewName);
+								});
+							jumpToView(viewId, viewName);
+							closePanel();
+						}
+						else
+						{
+
+							MessageUtil.showMessage("创建视图失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建视图失败!(通信异常)");
+					});
+			}
+
+			// 选择已有视图后保存
+			private function saveFromSelect():void
+			{
+				_viewDependElements.forEach(function(element:IElement, index:int, array:Array):void
+					{
+						saveElementsViewProperty(element, _selectViewId, _selectViewName);
+					});
+				jumpToView(_selectViewId, _selectViewName);
+				closePanel();
+			}
+
+			// 给批量元素增加视图属性
+			private function saveElementsViewProperty(element:IElement, viewId:String, viewName:String):void
+			{
+				element.addExtendProperty(viewId, viewName);
+				DataUtil.saveElementExtendProperties(_dataSource, _topoCanvas.topoId, _topoCanvas.topoName, element, function(map:IMap):void
+					{
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							// 属性保存成功,刷新显示
+							element.feature.refresh();
+						}
+						else
+						{
+							element.removeExtendProperty(viewId);
+						}
+					}, function():void
+					{
+					}, function():void
+					{
+						element.removeExtendProperty(viewId);
+					});
+			}
+
+			// 跳转到新创建的视图中 
+			private function jumpToView(viewId:String, viewName:String):void
+			{
+				_topoCanvas.loadTopo(viewId, ElementProperties.PROPERTYVALUE_NETVIEW_TYPE_VIEW);
+
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<mx:Validator id="existViewValidator"
+					  source="{existViewName}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请选择已有视图"/>
+		<mx:Validator id="nameValidator"
+					  source="{viewName}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请输入视图名称"/>
+	</fx:Declarations>
+	<mx:Form width="100%">
+		<mx:FormItem label="创建类型">
+			<s:HGroup gap="20">
+				<s:RadioButton groupName="createTypeRadio"
+							   id="createType_new"
+							   label="新建视图"
+							   click="createType_new_clickHandler()"/>
+				<s:RadioButton groupName="createTypeRadio"
+							   id="createType_select"
+							   label="选择已有"
+							   click="createType_select_clickHandler()"/>
+			</s:HGroup>
+		</mx:FormItem>
+		<mx:FormItem label="视图名称"
+					 includeIn="createType_New">
+			<s:TextInput id="viewName"
+						 text="{_currentViewName}"
+						 width="150"/>
+		</mx:FormItem>
+		<mx:FormItem label="已有视图"
+					 includeIn="createType_Select">
+			<s:HGroup gap="10">
+				<s:TextInput id="existViewName"
+							 text="{_currentExistViewName}"
+							 width="120"
+							 editable="false"/>
+				<mx:Image source="{TopoIcons.searchIcon}"
+						  toolTip="查找视图"
+						  buttonMode="true"
+						  click="findView_clickHandler()"/>
+			</s:HGroup>
+		</mx:FormItem>
+		<s:HGroup width="100%"
+				  horizontalAlign="center"
+				  gap="20">
+			<s:Button id="submitBtn"
+					  label="确 定"
+					  click="save_clickHandler()"/>
+			<s:Button label="关 闭"
+					  click="closePanel();"/>
+		</s:HGroup>
+	</mx:Form>
+	<panel:states>
+		<s:State name="createType_New"/>
+		<s:State name="createType_Select"/>
+	</panel:states>
+</panel:AbstractCEPWindow>

@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="340"
+						 title="{_title}"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.point.ITPText;
+			import com.linkage.module.topo.framework.core.model.element.point.TPText;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.TextModifyPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 正在编辑的文本对象(为空代表新增)
+			private var _modifyText:ITPText = null;
+
+			// 创建的位置
+			private var _creationPoint:Point = new Point();
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				_topoCanvas.addEventListener(TopoEvent.CREATE_TEXT, function(event:TopoEvent):void
+					{
+						showPanel(event);
+					});
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_TEXT, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as ITPText);
+					});
+			}
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, tpText:ITPText = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开文本面板,开始初始化...");
+				}
+				_modifyText = tpText;
+				if (_modifyText)
+				{
+					_title = "编辑文本";
+					textContent.text = _modifyText.text;
+					textColor.selectedColor = _modifyText.textColor;
+					textSize.value = _modifyText.textSize;
+				}
+				else
+				{
+					_title = "创建文本";
+					_creationPoint = event.mousePoint;
+					textContent.text = "";
+					textColor.selectedColor = ElementProperties.DEFAULT_OBJECT_TEXT_COLOR;
+					textSize.value = ElementProperties.DEFAULT_OBJECT_TEXT_SIZE;
+				}
+			}
+
+			// 保存按钮点击
+			private function save_clickHandler():void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyText)
+				{
+					saveModify(_modifyText);
+				}
+				else
+				{
+					saveCreate();
+				}
+			}
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+				return TopoUtil.checkValidators([contentValidator]);
+			}
+
+			// 新创建后保存
+			private function saveCreate():void
+			{
+				var tpText:ITPText = new TPText();
+				tpText.visible = 1;
+				tpText.x = _creationPoint.x;
+				tpText.y = _creationPoint.y;
+				commitFormProperties(tpText);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([tpText], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_OBJECT, data);
+				log.debug("saveCreate: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("创建文本失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建文本失败!(通信异常)");
+					});
+			}
+
+			// 编辑后保存
+			private function saveModify(tpText:ITPText):void
+			{
+				commitFormProperties(tpText);
+				// 元素变化后,要同步更新样式
+				tpText.feature.style = _topoCanvas.styleFactory.buildStyle(tpText);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([tpText], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [tpText.id]);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							tpText.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改文本失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改文本失败!(通信异常)");
+					});
+			}
+
+			// 提交页面上的属性到对象中
+			private function commitFormProperties(tpText:ITPText):void
+			{
+				tpText.text = StringUtil.trim(textContent.text);
+				tpText.textColor = textColor.selectedColor;
+				tpText.textSize = textSize.value;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<mx:Validator id="contentValidator"
+					  source="{textContent}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请输入文本内容"/>
+
+	</fx:Declarations>
+	<mx:Form width="100%">
+		<mx:FormItem label="文本内容">
+			<s:TextInput id="textContent"
+						 width="150"/>
+		</mx:FormItem>
+		<mx:FormItem label="字体颜色">
+			<mx:ColorPicker id="textColor"/>
+		</mx:FormItem>
+		<mx:FormItem label="字体大小">
+			<s:NumericStepper id="textSize"
+							  width="150"
+							  toolTip="范围: 1 -- 50"
+							  minimum="1"
+							  maximum="50"
+							  maxChars="2"
+							  stepSize="1"
+							  snapInterval="1"
+							  allowValueWrap="false"/>
+		</mx:FormItem>
+		<s:HGroup width="100%"
+				  horizontalAlign="center"
+				  gap="20">
+			<s:Button id="submitBtn"
+					  label="确 定"
+					  click="save_clickHandler()"/>
+			<s:Button label="关 闭"
+					  click="closePanel();"/>
+		</s:HGroup>
+	</mx:Form>
+</panel:AbstractCEPWindow>

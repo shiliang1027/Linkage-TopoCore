@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="340"
+						 title="{_title}"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.plane.IHLinkTopo;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.ImageBuffer;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.module.topo.framework.view.component.panel.spareparts.IconChooser;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+
+			import mx.collections.XMLListCollection;
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.SegmentMirrorModifyPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 图标缓存类
+			private var _imageBuffer:ImageBuffer = ImageBuffer.getInstance();
+
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 远程图标上下文
+			[Bindable]
+			private var _iconContext:String = null;
+			// 正在编辑的网段镜像对象(为空代表新增)
+			private var _modifyHLinkTopo:IHLinkTopo = null;
+
+			// 缩略图创建的位置
+			private var _creationPoint:Point = new Point();
+
+			// 图标选择面板
+			private var _iconChooser:IconChooser = null;
+			// 选中的网段图标
+			private var _selectedSegmentIcon:String = null;
+			// ------ 当前值 -------
+			[Bindable]
+			private var _currentIconBitmap:Bitmap = null;
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入图标上下文
+			 */
+			public function set iconContext(value:String):void
+			{
+				_iconContext = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_SEGMENT_MIRROR, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as IHLinkTopo);
+					});
+			}
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, hlinkTopo:IHLinkTopo = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开云图镜像面板,开始初始化...");
+
+					_iconChooser = new IconChooser();
+					_iconChooser.iconContext = _iconContext;
+					// 查询图标数据
+					_dataSource.queryTopoIcons(function(data:XML):void
+						{
+							var iconList:XMLList = data.child("icon");
+							_iconChooser.iconList = new XMLListCollection(iconList);
+						});
+					// 图标面板选中具体图标
+					_iconChooser.initPanel(function(selectedIcon:Object):void
+						{
+							_currentIconBitmap = new Bitmap(selectedIcon.bitmapData);
+							_selectedSegmentIcon = selectedIcon.icon;
+							_iconChooser.hide();
+						});
+				}
+				_modifyHLinkTopo = hlinkTopo;
+				if (_modifyHLinkTopo)
+				{
+					_title = "编辑云图镜像";
+					segmentName.text = _modifyHLinkTopo.name;
+					setLabelLayoutProperty(_modifyHLinkTopo.labelLayout);
+					_selectedSegmentIcon = _modifyHLinkTopo.icon;
+					_imageBuffer.loadBitmapData(_iconContext + "/" + _modifyHLinkTopo.icon, function(bitmapData:BitmapData, width:Number, height:Number):void
+						{
+							_currentIconBitmap = new Bitmap(bitmapData);
+						});
+				}
+				else
+				{
+					_title = "创建云图镜像";
+				}
+
+			}
+
+			// 设置Label布局位置
+			private function setLabelLayoutProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_TOP:
+						labelLayout.selectedIndex = 0;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_LEFT:
+						labelLayout.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_RIGHT:
+						labelLayout.selectedIndex = 3;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_HIDE:
+						labelLayout.selectedIndex = 4;
+						break;
+					case ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_BOTTOM:
+					default:
+						labelLayout.selectedIndex = 1;
+						break;
+				}
+			}
+
+			// 显示更多的图标
+			private function showMoreIcon_clickHandler(event:MouseEvent):void
+			{
+				_iconChooser.show(_topoCanvas, true);
+			}
+
+
+			// 保存按钮点击
+			private function save_clickHandler():void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyHLinkTopo)
+				{
+					saveModify(_modifyHLinkTopo);
+				}
+				else
+				{
+					// 暂时没有创建逻辑
+				}
+			}
+
+			private function checkForm():Boolean
+			{
+				// 检查名称验证器是否通过
+				return TopoUtil.checkValidators([nameValidator]);
+			}
+
+			// 修改后保存
+			private function saveModify(hLinkTopo:IHLinkTopo):void
+			{
+				commitFormProperties(hLinkTopo);
+				// 元素变化后,要同步更新样式
+				hLinkTopo.feature.style = _topoCanvas.styleFactory.buildStyle(hLinkTopo);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([hLinkTopo], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [hLinkTopo.id]);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							hLinkTopo.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改云图镜像失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改云图镜像失败!(通信异常)");
+					});
+			}
+
+			// 提交页面上的属性到对象中
+			private function commitFormProperties(hLinkTopo:IHLinkTopo):void
+			{
+				hLinkTopo.name = StringUtil.trim(segmentName.text);
+				hLinkTopo.labelLayout = labelLayout.selectedItem.value;
+				hLinkTopo.icon = _selectedSegmentIcon;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<mx:Validator id="nameValidator"
+					  source="{segmentName}"
+					  property="text"
+					  required="true"
+					  requiredFieldError="请输入名称"/>
+	</fx:Declarations>
+	<mx:Form width="100%">
+		<mx:FormItem label="名称">
+			<s:TextInput id="segmentName"
+						 width="150"/>
+		</mx:FormItem>
+		<mx:FormItem label="名称位置">
+			<s:DropDownList id="labelLayout"
+							width="150"
+							selectedIndex="0">
+				<s:dataProvider>
+					<s:ArrayList>
+						<fx:Object label="顶部"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_TOP}"/>
+						<fx:Object label="底部"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_BOTTOM}"/>
+						<fx:Object label="左侧"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_LEFT}"/>
+						<fx:Object label="右侧"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_RIGHT}"/>
+						<fx:Object label="隐藏"
+								   value="{ElementProperties.PROPERTYVALUE_LABEL_LAYOUT_HIDE}"/>
+					</s:ArrayList>
+				</s:dataProvider>
+			</s:DropDownList>
+		</mx:FormItem>
+		<mx:FormItem label="图标"
+					 height="32">
+			<s:HGroup gap="20">
+				<mx:Image source="{_currentIconBitmap}"
+						  width="32"
+						  height="32"/>
+				<mx:Image source="{TopoIcons.searchIcon}"
+						  toolTip="查找图标"
+						  buttonMode="true"
+						  click="showMoreIcon_clickHandler(event)"/>
+			</s:HGroup>
+		</mx:FormItem>
+		<s:HGroup width="100%"
+				  horizontalAlign="center"
+				  gap="20">
+			<s:Button id="submitBtn"
+					  label="确 定"
+					  click="save_clickHandler()"/>
+			<s:Button label="关 闭"
+					  click="closePanel();"/>
+		</s:HGroup>
+	</mx:Form>
+</panel:AbstractCEPWindow>

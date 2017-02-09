@@ -1,0 +1,552 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="340"
+						 maxHeight="400"
+						 title="{_title}"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.plane.ITPGrid;
+			import com.linkage.module.topo.framework.core.model.element.plane.TPGrid;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.util.serial.ISerial;
+			import com.linkage.module.topo.framework.util.serial.IntSerial;
+			import com.linkage.module.topo.framework.util.serial.UpperCaseLetterSerial;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.TPGridModifyPanel");
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			// 正在编辑的形状对象(为空代表新增)
+			private var _modifyTPGrid:ITPGrid = null;
+
+			// 创建的位置
+			private var _creationPoint:Point = new Point();
+
+			// 连续序列
+			private var _intSerial:ISerial = new IntSerial();
+			private var _uclSerial:ISerial = new UpperCaseLetterSerial();
+
+
+			// ------ 默认值 -----
+			[Bindable]
+			private var _currentFillColorStart:uint = 0;
+			[Bindable]
+			private var _currentFillColorEnd:uint = 0;
+
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				// 新增
+				_topoCanvas.addEventListener(TopoEvent.CREATE_TPGRID, function(event:TopoEvent):void
+					{
+						showPanel(event);
+					});
+				// 编辑
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_TPGRID, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as ITPGrid);
+					});
+
+			}
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, tpGrid:ITPGrid = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开形状面板,开始初始化...");
+				}
+				_modifyTPGrid = tpGrid;
+
+				if (_modifyTPGrid)
+				{
+					_title = "编辑网格";
+
+					gridWidth.text = String(_modifyTPGrid.width);
+					gridHeight.text = String(_modifyTPGrid.height);
+					rowCount.value = _modifyTPGrid.rowCount;
+					rowPercent.text = _modifyTPGrid.rowPercents.join(TPGrid.SPLIT_CHAR);
+					rowSerial.text = _modifyTPGrid.rowSerial.join(TPGrid.SPLIT_CHAR);
+					setRowLabelLayoutProperty(_modifyTPGrid.rowLabelLayout);
+					columnCount.value = _modifyTPGrid.columnCount;
+					columnPercent.text = _modifyTPGrid.columnPercents.join(TPGrid.SPLIT_CHAR);
+					columnSerial.text = _modifyTPGrid.columnSerial.join(TPGrid.SPLIT_CHAR);
+					setColumnLabelLayoutProperty(_modifyTPGrid.columnLabelLayout);
+
+					_currentFillColorStart = _modifyTPGrid.cellFillColorStart;
+					_currentFillColorEnd = _modifyTPGrid.cellFillColorEnd;
+					fillAlpha.value = _modifyTPGrid.cellFillAlpha;
+					borderWidth.value = _modifyTPGrid.borderWidth;
+					borderColor.selectedColor = _modifyTPGrid.borderColor;
+					borderAlpha.value = _modifyTPGrid.borderAlpha;
+
+				}
+				else
+				{
+					_intSerial.current = 1;
+					_uclSerial.current = "A";
+
+					_title = "创建网格";
+					_creationPoint = event.mousePoint;
+					gridWidth.text = "100";
+					gridHeight.text = "80";
+					rowCount.value = ElementProperties.DEFAULT_GRID_ROW_COUNT;
+					rowPercent.text = TopoUtil.findAvgPercent(rowCount.value).join(TPGrid.SPLIT_CHAR);
+					rowSerial.text = TopoUtil.findSerial(rowCount.value, _intSerial).join(TPGrid.SPLIT_CHAR);
+					setRowLabelLayoutProperty(ElementProperties.DEFAULT_GRID_ROW_LABEL_LAYOUT);
+					columnCount.value = ElementProperties.DEFAULT_GRID_COLUMN_COUNT;
+					columnPercent.text = TopoUtil.findAvgPercent(columnCount.value).join(TPGrid.SPLIT_CHAR);
+					columnSerial.text = TopoUtil.findSerial(columnCount.value, _uclSerial).join(TPGrid.SPLIT_CHAR);
+					setColumnLabelLayoutProperty(ElementProperties.DEFAULT_GRID_COLUMN_LABEL_LAYOUT);
+
+					_currentFillColorStart = ElementProperties.DEFAULT_GRID_CELL_FILL_COLOR_START;
+					_currentFillColorEnd = ElementProperties.DEFAULT_GRID_CELL_FILL_COLOR_END;
+					fillAlpha.value = ElementProperties.DEFAULT_GRID_CELL_FILL_ALPHA;
+					borderWidth.value = ElementProperties.DEFAULT_GRID_BORDER_WIDTH;
+					borderColor.selectedColor = ElementProperties.DEFAULT_GRID_BORDER_COLOR;
+					borderAlpha.value = ElementProperties.DEFAULT_GRID_BORDER_ALPHA;
+				}
+			}
+
+			// 设置 Row Label布局位置
+			private function setRowLabelLayoutProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_GRID_ROW_LABEL_LAYOUT_RIGHT:
+						rowLabelLayout.selectedIndex = 1;
+						break;
+					case ElementProperties.PROPERTYVALUE_GRID_LABEL_LAYOUT_HIDE:
+						rowLabelLayout.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_GRID_ROW_LABEL_LAYOUT_LEFT:
+						rowLabelLayout.selectedIndex = 0;
+					default:
+						break;
+				}
+			}
+
+			// 设置 Column Label布局位置
+			private function setColumnLabelLayoutProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_GRID_COLUMN_LABEL_LAYOUT_BOTTOM:
+						columnLabelLayout.selectedIndex = 1;
+						break;
+					case ElementProperties.PROPERTYVALUE_GRID_LABEL_LAYOUT_HIDE:
+						columnLabelLayout.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_GRID_COLUMN_LABEL_LAYOUT_TOP:
+						columnLabelLayout.selectedIndex = 0;
+					default:
+						break;
+				}
+			}
+
+			// 保存按钮点击
+			private function save_clickHandler(event:MouseEvent):void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyTPGrid)
+				{
+					saveModify(_modifyTPGrid);
+				}
+				else
+				{
+					saveCreate();
+				}
+			}
+
+
+			private var percRegExp_start:String = "^0.[0-9]*[1-9]";
+			private var percRegExp_middle:String = "0.[0-9]*[1-9]";
+			private var percRegExp_end:String = "0.[0-9]*[1-9]$";
+
+			private var serialRegExp_start:String = "^[a-zA-Z0-9]+";
+			private var serialRegExp_middle:String = "[a-zA-Z0-9]+";
+			private var serialRegExp_end:String = "[a-zA-Z0-9]+$";
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+//				var rowNum:int = rowCount.value;
+//				if (rowNum == 1)
+//				{
+//					rowPercentValidor.expression = "^1$";
+//					rowPercentValidor.noMatchError = "值只能为1";
+//					rowSerialValidor.expression = "^" + serialRegExp_middle + "$";
+//					rowSerialValidor.noMatchError = "行序号仅能为字母或数字";
+//				}
+//				else
+//				{
+//					var rowPercRegArray:Array = [];
+//					var rowSerialRegArray:Array = [];
+//					rowPercRegArray.push(percRegExp_start);
+//					rowSerialRegArray.push(serialRegExp_start);
+//					for (var i:int = 1; i < rowNum - 1; i++)
+//					{
+//						rowPercRegArray.push(percRegExp_middle);
+//						rowSerialRegArray.push(serialRegExp_middle);
+//					}
+//					rowPercRegArray.push(percRegExp_end);
+//					rowSerialRegArray.push(serialRegExp_end);
+//					rowPercentValidor.expression = rowPercRegArray.join(TPGrid.SPLIT_CHAR);
+//					rowPercentValidor.noMatchError = "有且仅有" + rowNum + "行,每行占比仅能为0-1之间的小数";
+//					rowSerialValidor.expression = rowSerialRegArray.join(TPGrid.SPLIT_CHAR);
+//					rowSerialValidor.noMatchError = "有且仅有" + rowNum + "行,每行序号仅能为字母或数字";
+//				}
+//				var columnNum:int = columnCount.value;
+//				if (columnNum == 1)
+//				{
+//					columnPercentValidor.expression = "^1$";
+//					columnPercentValidor.noMatchError = "值只能为1";
+//					columnSerialValidor.expression = "^" + serialRegExp_middle + "$";
+//					columnSerialValidor.noMatchError = "行序号仅能为字母或数字";
+//				}
+//				else
+//				{
+//					var columnPercRegArray:Array = [];
+//					var columnSerialRegArray:Array = [];
+//					columnPercRegArray.push(percRegExp_start);
+//					columnSerialRegArray.push(serialRegExp_start);
+//					for (var j:int = 1; j < columnNum - 1; j++)
+//					{
+//						columnPercRegArray.push(percRegExp_middle);
+//						columnSerialRegArray.push(serialRegExp_middle);
+//					}
+//					columnPercRegArray.push(percRegExp_end);
+//					columnSerialRegArray.push(serialRegExp_end);
+//					columnPercentValidor.expression = columnPercRegArray.join(TPGrid.SPLIT_CHAR);
+//					columnPercentValidor.noMatchError = "有且仅有" + columnNum + "列,每列占比仅能为0-1之间的小数";
+//					columnSerialValidor.expression = columnSerialRegArray.join(TPGrid.SPLIT_CHAR);
+//					columnSerialValidor.noMatchError = "有且仅有" + columnNum + "列,每列序号仅能为字母或数字";
+//				}
+				// 检查验证器是否通过
+//				return TopoUtil.checkValidators([widthValidator, heightValidator, rowPercentValidor, rowSerialValidor, columnPercentValidor, columnSerialValidor]);
+				return TopoUtil.checkValidators([widthValidator, heightValidator]);
+			}
+
+			// 新创建后保存
+			private function saveCreate():void
+			{
+				var tpGrid:ITPGrid = new TPGrid();
+				tpGrid.visible = 1;
+				tpGrid.zindex = -1;
+				// 画布的坐标转换为入库的坐标
+				tpGrid.x = _creationPoint.x - _topoCanvas.dataBounds.offsetX;
+				tpGrid.y = _creationPoint.y - _topoCanvas.dataBounds.offsetY;
+				commitFormProperties(tpGrid);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([tpGrid], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_OBJECT, data);
+				log.debug("saveCreate: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("创建网格对象失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建网格对象失败!(通信异常)");
+					});
+			}
+
+			// 编辑后保存
+			private function saveModify(tpGrid:ITPGrid):void
+			{
+				commitFormProperties(tpGrid);
+				// 元素变化后,要同步更新样式
+				tpGrid.feature.style = _topoCanvas.styleFactory.buildStyle(tpGrid);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([tpGrid], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [tpGrid.id]);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							tpGrid.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改网格对象失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改网格对象失败!(通信异常)");
+					});
+			}
+
+			// 提交页面上的属性到对象中
+			private function commitFormProperties(tpGrid:ITPGrid):void
+			{
+				tpGrid.width = int(gridWidth.text);
+				tpGrid.height = int(gridHeight.text);
+
+				tpGrid.rowCount = rowCount.value;
+				tpGrid.rowPercents = rowPercent.text.split(TPGrid.SPLIT_CHAR);
+				tpGrid.rowSerial = rowSerial.text.split(TPGrid.SPLIT_CHAR);
+				tpGrid.rowLabelLayout = rowLabelLayout.selectedItem.value;
+				tpGrid.columnCount = columnCount.value;
+				tpGrid.columnPercents = columnPercent.text.split(TPGrid.SPLIT_CHAR);
+				tpGrid.columnSerial = columnSerial.text.split(TPGrid.SPLIT_CHAR);
+				tpGrid.columnLabelLayout = columnLabelLayout.selectedItem.value;
+
+				tpGrid.cellFillAlpha = fillAlpha.value;
+				tpGrid.cellFillColorStart = fillColorStart.selectedColor;
+				tpGrid.cellFillColorEnd = fillColorEnd.selectedColor;
+				tpGrid.borderColor = borderColor.selectedColor;
+				tpGrid.borderWidth = borderWidth.value;
+				tpGrid.borderAlpha = borderAlpha.value;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<mx:NumberValidator id="widthValidator"
+							source="{gridWidth}"
+							property="text"
+							allowNegative="false"
+							domain="int"
+							minValue="1"/>
+		<mx:NumberValidator id="heightValidator"
+							source="{gridHeight}"
+							property="text"
+							allowNegative="false"
+							domain="int"
+							minValue="1"/>
+		<!--
+			 <mx:RegExpValidator id="rowPercentValidor"
+			 source="{rowPercent}"
+			 expression="[a-zA-Z0-9,]*"
+			 property="text"/>
+			 <mx:RegExpValidator id="rowSerialValidor"
+			 source="{rowSerial}"
+			 expression="[a-zA-Z0-9,]*"
+			 property="text"/>
+			 <mx:RegExpValidator id="columnPercentValidor"
+			 source="{columnPercent}"
+			 expression="[a-zA-Z0-9,]*"
+			 property="text"/>
+			 <mx:RegExpValidator id="columnSerialValidor"
+			 source="{columnSerial}"
+			 expression="[a-zA-Z0-9,]*"
+			 property="text"/>
+		-->
+
+	</fx:Declarations>
+	<s:Scroller width="100%"
+				height="100%">
+		<s:Group width="100%">
+			<mx:Form width="100%">
+				<mx:FormHeading label="基本属性"/>
+				<mx:FormItem label="宽度">
+					<s:TextInput id="gridWidth"
+								 width="120"/>
+				</mx:FormItem>
+				<mx:FormItem label="高度">
+					<s:TextInput id="gridHeight"
+								 width="120"/>
+				</mx:FormItem>
+				<mx:FormItem label="填充颜色">
+					<s:HGroup gap="20">
+						<mx:ColorPicker id="fillColorStart"
+										selectedColor="{_currentFillColorStart}"/>
+						<mx:ColorPicker id="fillColorEnd"
+										selectedColor="{_currentFillColorEnd}"/>
+					</s:HGroup>
+				</mx:FormItem>
+				<mx:FormItem label="填充透明度"
+							 width="100%">
+					<s:HSlider id="fillAlpha"
+							   width="120"
+							   minimum="0"
+							   maximum="1"
+							   stepSize="0.1"/>
+				</mx:FormItem>
+				<mx:FormItem label="边框粗细">
+					<s:NumericStepper id="borderWidth"
+									  toolTip="范围: 0 -- 20"
+									  width="120"
+									  maxChars="3"
+									  maximum="20"
+									  minimum="0"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="边框颜色">
+					<mx:ColorPicker id="borderColor"/>
+				</mx:FormItem>
+				<mx:FormItem label="边框透明度">
+					<s:HSlider id="borderAlpha"
+							   width="120"
+							   minimum="0"
+							   maximum="1"
+							   stepSize="0.1"/>
+				</mx:FormItem>
+
+				<mx:FormHeading label="行属性"/>
+				<mx:FormItem label="行数量">
+					<s:NumericStepper id="rowCount"
+									  width="120"
+									  toolTip="范围: 1 -- 99"
+									  maxChars="2"
+									  minimum="1"
+									  maximum="99"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="行占比">
+					<s:TextInput id="rowPercent"
+								 width="120"
+								 toolTip="多行时 中间使用','分隔"/>
+				</mx:FormItem>
+				<mx:FormItem label="行序号">
+					<s:TextInput id="rowSerial"
+								 width="120"
+								 toolTip="多行时 中间使用','分隔"/>
+				</mx:FormItem>
+				<mx:FormItem label="行序号位置">
+					<s:DropDownList id="rowLabelLayout"
+									width="120"
+									selectedIndex="0">
+						<s:dataProvider>
+							<s:ArrayList>
+								<fx:Object label="左侧"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_ROW_LABEL_LAYOUT_LEFT}"/>
+								<fx:Object label="右侧"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_ROW_LABEL_LAYOUT_RIGHT}"/>
+								<fx:Object label="隐藏"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_LABEL_LAYOUT_HIDE}"/>
+							</s:ArrayList>
+						</s:dataProvider>
+					</s:DropDownList>
+				</mx:FormItem>
+
+				<mx:FormHeading label="列属性"/>
+				<mx:FormItem label="列数量">
+					<s:NumericStepper id="columnCount"
+									  width="120"
+									  toolTip="范围: 1 -- 99"
+									  maxChars="2"
+									  minimum="1"
+									  maximum="99"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="列占比">
+					<s:TextInput id="columnPercent"
+								 width="120"
+								 toolTip="多列时 中间使用','分隔"/>
+				</mx:FormItem>
+				<mx:FormItem label="列序号">
+					<s:TextInput id="columnSerial"
+								 width="120"
+								 toolTip="多列时 中间使用','分隔"/>
+				</mx:FormItem>
+				<mx:FormItem label="列序号位置">
+					<s:DropDownList id="columnLabelLayout"
+									width="120"
+									selectedIndex="0">
+						<s:dataProvider>
+							<s:ArrayList>
+								<fx:Object label="顶部"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_COLUMN_LABEL_LAYOUT_TOP}"/>
+								<fx:Object label="底部"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_COLUMN_LABEL_LAYOUT_BOTTOM}"/>
+								<fx:Object label="隐藏"
+										   value="{ElementProperties.PROPERTYVALUE_GRID_LABEL_LAYOUT_HIDE}"/>
+							</s:ArrayList>
+						</s:dataProvider>
+					</s:DropDownList>
+				</mx:FormItem>
+
+			</mx:Form>
+		</s:Group>
+	</s:Scroller>
+	<s:HGroup width="100%"
+			  horizontalAlign="center"
+			  gap="20">
+		<s:Button id="submitBtn"
+				  label="确 定"
+				  click="save_clickHandler(event)"/>
+		<s:Button label="关 闭"
+				  click="closePanel();"/>
+	</s:HGroup>
+</panel:AbstractCEPWindow>

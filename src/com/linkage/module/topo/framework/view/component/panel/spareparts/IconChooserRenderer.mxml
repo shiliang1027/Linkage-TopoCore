@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:ItemRenderer xmlns:fx="http://ns.adobe.com/mxml/2009"
+				xmlns:s="library://ns.adobe.com/flex/spark"
+				xmlns:mx="library://ns.adobe.com/flex/mx"
+				autoDrawBackground="true"
+				buttonMode="true"
+				width="32"
+				height="32"
+				rollOver="image1_rollOverHandler(event)"
+				rollOut="image1_rollOutHandler(event)">
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+		<s:GlowFilter id="glow"
+					  color="0x009DFF"/>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import mx.events.ItemClickEvent;
+
+			protected function image1_rollOverHandler(event:MouseEvent):void
+			{
+				this.filters = [glow]
+			}
+
+			protected function image1_rollOutHandler(event:MouseEvent):void
+			{
+				this.filters = [];
+			}
+
+		]]>
+	</fx:Script>
+	<mx:Image id="image"
+			  source="{new Bitmap(data.bitmapData)}"
+			  toolTip="{data.name}"
+			  width="32"
+			  height="32">
+	</mx:Image>
+
+</s:ItemRenderer>

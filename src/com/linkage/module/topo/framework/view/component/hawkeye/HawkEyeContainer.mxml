@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 xmlns:hawkeye="com.linkage.module.topo.framework.view.component.hawkeye.*"
+		 minWidth="100"
+		 minHeight="80">
+	<s:layout>
+		<s:VerticalLayout/> 
+	</s:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.controller.event.PathChangeEvent;
+			import com.linkage.module.topo.framework.service.core.mo.TopoPath;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.HawkEyeContainer");
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 鹰眼列表
+			private var _hawkEyes:Array = [];
+			// 当前层次对应的鹰眼
+			private var _currentHawkEye:HawkEye = null;
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+				initRegisters();
+			}
+
+			// 切换显示/隐藏的状态
+			public function toggle():void
+			{
+				this.visible = !this.visible;
+			}
+
+			public function show():void
+			{
+				this.visible = true;
+			}
+
+			public function hide():void
+			{
+				this.visible = false;
+			}
+
+			// 注册监听器
+			private function initRegisters():void
+			{
+				_topoCanvas.addEventListener(PathChangeEvent.PREPARE_CHANGE_PATH, function(event:PathChangeEvent):void
+					{
+						prepareChangePath(event.path);
+					});
+				_topoCanvas.addEventListener(PathChangeEvent.NEW_PATH, function(event:PathChangeEvent):void
+					{
+						addNewPath(event.path);
+					});
+				_topoCanvas.addEventListener(PathChangeEvent.LOCATE_PATH, function(event:PathChangeEvent):void
+					{
+						locatePath(event.path);
+					});
+				_topoCanvas.addEventListener(PathChangeEvent.CLEAR_AFTER_PATH, function(event:PathChangeEvent):void
+					{
+						clearAfterPath(event.path);
+					});
+				_topoCanvas.addEventListener(PathChangeEvent.REMOVE_PATH, function(event:PathChangeEvent):void
+					{
+						removePath(event.path);
+					});
+				_topoCanvas.addEventListener(PathChangeEvent.CLEAR_ALL_PATH, function(event:PathChangeEvent):void
+					{
+						clearAllPath();
+					});
+			}
+
+			// 准备切换层次
+			private function prepareChangePath(path:TopoPath):void
+			{
+				// 先禁用当前的鹰眼
+				if (_currentHawkEye)
+					_currentHawkEye.disable();
+			}
+
+			// 新增层次
+			private function addNewPath(path:TopoPath):void
+			{
+				var hawkEye:HawkEye = new HawkEye(path);
+				hawkEye.topoCanvas = _topoCanvas;
+				hawkEye.height = this.minHeight;
+				hawkEye.width = this.width;
+				this.addElement(hawkEye);
+				_hawkEyes.push(hawkEye);
+				// 切换当前的鹰眼
+				if (_currentHawkEye)
+				{
+					_currentHawkEye.disable();
+				}
+				_currentHawkEye = hawkEye;
+				_currentHawkEye.enable();
+				log.debug("新增鹰眼 {0}", _currentHawkEye.path);
+
+			}
+
+			// 定位层次
+			private function locatePath(targetPath:TopoPath):void
+			{
+				if (_currentHawkEye)
+					_currentHawkEye.disable();
+				if (!_hawkEyes.some(function(hawkEye:HawkEye, index:int, array:Array):Boolean
+					{
+						if (hawkEye.path.equals(targetPath))
+						{
+							_currentHawkEye = hawkEye;
+							_currentHawkEye.enable();
+							log.debug("定位鹰眼 {0}", _currentHawkEye.path);
+							return true;
+						}
+						return false;
+					}))
+				{
+					addNewPath(targetPath);
+				}
+			}
+
+			// 清除指定path之后的全部path
+			private function clearAfterPath(targetPath:TopoPath):void
+			{
+				if (_currentHawkEye)
+					_currentHawkEye.disable();
+				var index:int = -1;
+				if (_hawkEyes.some(function(hawkEye:HawkEye, index1:int, arr:Array):Boolean
+					{
+						index = index1;
+						return hawkEye.path.equals(targetPath);
+					}))
+				{
+					var delArray:Array = _hawkEyes.splice(index + 1, _hawkEyes.length - (index + 1));
+					delArray.forEach(function(hawkEye:HawkEye, index2:int, array:Array):void
+						{
+							this.removeElement(hawkEye);
+							hawkEye.destroy();
+							log.debug("清除鹰眼 {0}", hawkEye.path);
+						}, this);
+				}
+			}
+
+			// 清除指定的path
+			private function removePath(targetPath:TopoPath):void
+			{
+				var index:int = -1;
+				if (_hawkEyes.some(function(hawkEye:HawkEye, index1:int, arr:Array):Boolean
+					{
+						index = index1;
+						return hawkEye.path.equals(targetPath);
+					}))
+				{
+					var delArray:Array = _hawkEyes.splice(index, 1);
+					delArray.forEach(function(hawkEye:HawkEye, index2:int, array:Array):void
+						{
+							this.removeElement(hawkEye);
+							hawkEye.destroy();
+							log.debug("清除鹰眼 {0}", hawkEye.path);
+						}, this);
+				}
+			}
+
+			// 清除全部的path
+			public function clearAllPath():void
+			{
+				var delArray:Array = _hawkEyes.splice(0, _hawkEyes.length);
+				delArray.forEach(function(hawkEye:HawkEye, index2:int, array:Array):void
+					{
+						this.removeElement(hawkEye);
+						hawkEye.destroy();
+						log.debug("清除鹰眼 {0}", hawkEye.path);
+					}, this);
+				_currentHawkEye = null;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+</s:Group>

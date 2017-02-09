@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 width="100"
+		 height="180">
+	<s:layout>
+		<s:BasicLayout/>
+	</s:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.CanvasEvent;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+
+			// log
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.toolbar.ZoomSlider");
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 最小缩放
+			[Bindable]
+			private var _minimun:Number = 10;
+			// 最大缩放
+			[Bindable]
+			private var _maximum:Number = 200;
+			[Bindable]
+			private var _reference:Number = 100;
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+
+
+				_topoCanvas.addEventListener(CanvasEvent.LAYER_CHANGED, function(event:CanvasEvent):void
+					{
+						slider.value = _reference;
+					});
+				_topoCanvas.addEventListener(CanvasEvent.SCALE_CHANGED, function(event:CanvasEvent):void
+					{
+						syncSlider(event.getProperty(Constants.MAP_KEY_SCALEX_BEFORE), event.getProperty(Constants.MAP_KEY_SCALEY_BEFORE), event.getProperty(Constants.MAP_KEY_SCALEX_AFTER), event.getProperty(Constants.
+							MAP_KEY_SCALEY_AFTER));
+					});
+			}
+
+
+			/**
+			 * 比例尺变化后的捕获事件
+			 */
+			private function slider_changeHandler(event:Event):void
+			{
+				var centerP:Point = _topoCanvas.viewBounds.center;
+				var scale:Number = slider.value / _reference;
+				_topoCanvas.zoomAtPointToScale(centerP.x, centerP.y, scale, scale);
+			}
+
+			/**
+			 * 格式化比例尺的提示内容
+			 */
+			private function formatName(value:Number):Object
+			{
+				var scale:Number = value / _reference * 100;
+
+				return scale.toFixed() + "%";
+			}
+
+			/**
+			 * 画布比例尺变化后,比例尺同步变化
+			 */
+			private function syncSlider(scaleX_before:Number, scaleY_before:Number, scaleX_after:Number, scaleY_after:Number):void
+			{
+				var scale:Number = Math.min(scaleX_after, scaleY_after) * 100;
+
+				slider.value = scale;
+
+			}
+		]]>
+	</fx:Script>
+	<s:VSlider id="slider"
+			   height="100%"
+			   value="{_reference}"
+			   minimum="{_minimun}"
+			   maximum="{_maximum}"
+			   dataTipPrecision="0"
+			   dataTipFormatFunction="formatName"
+			   stepSize="10"
+			   change="slider_changeHandler(event)"/>
+</s:Group>

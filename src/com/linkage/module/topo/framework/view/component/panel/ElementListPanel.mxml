@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 creationComplete="initPanel()">
+	<s:layout>
+		<s:HorizontalLayout verticalAlign="middle"/>
+	</s:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.CanvasEvent;
+			import com.linkage.module.topo.framework.core.model.element.IElement;
+			import com.linkage.module.topo.framework.core.model.element.line.ILink;
+			import com.linkage.module.topo.framework.core.model.element.point.ITPPoint;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.collections.XMLListCollection;
+			// log
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.ElementListPanel");
+
+			//  ---- 数据格式 ------
+			// <Device id="1/68da65ae-8e74-433a-a759-f702bd16050a" name="GZSSA8" remark="综合监控拓扑→交换网拓扑→惠州" ip="" /> 
+			//  ---- 数据格式 ------
+
+			// 请选择的数据
+			private var _pleaseSelect:XML = new XML("<Device id='-1' name='==请选择==' label='==请选择=='/>");
+
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 排序
+			private var _sort:Sort = null;
+			// 元素列表
+			[Bindable]
+			private var _elementList:XMLListCollection = new XMLListCollection();
+			// 缓存的元素列表(负责排序,不包含请选择)
+			private var _cacheElementList:XMLListCollection = new XMLListCollection();
+
+			// 选中网元的id
+			private var _selectElementId:String = null;
+			// 切换拓扑层次时是否弹出确认信息
+			private var _changeLayerConfirm:Boolean = true;
+			// 查询到多个设备时,是否定位第一个
+			private var _locateMultFirst:Boolean = false;
+			// 定位对象后的回调 定位成功后的回调函数,参数为: feature:Feature <br/> 例如: function(feature:Feature):void{...}
+			private var _locateCallback:Function = null;
+
+
+			private function initPanel():void
+			{
+				this.visible = false;
+
+				// 列表中的数据增加按照名称排序
+				_sort = new Sort();
+				_sort.fields = [new SortField("@name")];
+				_cacheElementList.sort = _sort;
+
+				_elementList.addItem(_pleaseSelect);
+
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				// 层次切换,重新获取数据
+				_topoCanvas.addEventListener(CanvasEvent.LAYER_CHANGED, function(event:CanvasEvent):void
+					{
+						if (visible == true)
+						{
+							checkElementListLabel(_cacheElementList);
+						}
+					});
+			}
+
+			/**
+			 * 切换拓扑层次时是否弹出确认信息
+			 */
+			public function set changeLayerConfirm(value:Boolean):void
+			{
+				_changeLayerConfirm = value;
+			}
+
+			/**
+			 * 查询到多个设备时,是否定位第一个
+			 */
+			public function set locateMultFirst(value:Boolean):void
+			{
+				_locateMultFirst = value;
+			}
+
+			/**
+			 * 定位成功后的回调函数,参数为: feature:Feature <br/> 例如: function(feature:Feature):void{...}
+			 */ 
+			public function set locateCallback(value:Function):void
+			{
+				_locateCallback = value
+			}
+
+			/**
+			 * 请空元素列表
+			 */
+			public function clearList():void
+			{
+				_elementList.removeAll();
+				_elementList.addItemAt(_pleaseSelect, 0);
+				_cacheElementList.removeAll();
+			}
+
+			/**
+			 * 注入元素列表的数据
+			 */
+			public function set dataXML(data:XMLListCollection):void
+			{
+				clearList();
+				appendDataXML(data);
+			}
+
+			/**
+			 * 增量的添加数据
+			 */
+			public function appendDataXML(data:XMLListCollection):void
+			{
+				// 已经存在的数量
+				var existSize:int = _cacheElementList.length;
+				checkElementListLabel(data);
+				_cacheElementList.addAll(data);
+				_cacheElementList.refresh();
+
+				// 最终展现的列表
+				_elementList.addAll(_cacheElementList);
+				_elementList.refresh();
+
+				if (existSize == 0)
+				{
+//					_elementList.removeAll();
+//					_elementList.addItemAt(_pleaseSelect, 0);
+
+					// 仅存在请选择的情况下，第一次添加数据时做个直接 定位的逻辑
+					var firstObj:Object = data.getItemAt(0);
+					if (data.length == 1)
+					{
+						// 直接定位
+						elements.selectedIndex = 1;
+						locateElement(firstObj.@id, firstObj.@name, firstObj.@topoName);
+					}
+					else
+					{
+						if (_locateMultFirst)
+						{
+							elements.selectedIndex = 1;
+							locateElement(firstObj.@id, firstObj.@name, firstObj.@topoName);
+						}
+						else
+						{
+							elements.selectedIndex = 0;
+						}
+					}
+				}
+			}
+
+			/**
+			 * 验证元素的label,以及是否在当前层中
+			 */
+			private function checkElementListLabel(data:XMLListCollection):void
+			{
+				for each (var obj:Object in data)
+				{
+					if (_topoCanvas.findElementById(obj.@id))
+					{
+						obj.@label = obj.@name + " (当前层)";
+					}
+					else
+					{
+						obj.@label = obj.@name;
+					}
+				}
+			}
+
+
+			/**
+			 * 展示面板
+			 */
+			public function show():void
+			{
+				this.visible = true;
+			}
+
+			/**
+			 * 隐藏面板
+			 */
+			public function hide():void
+			{
+				this.visible = false;
+				this.changeLayerConfirm = true;
+				this.locateMultFirst = false;
+				this.locateCallback = null;
+			}
+
+			// 元素切换事件
+			private function elements_changeHandler():void
+			{
+				var id:String = elements.selectedItem.@id;
+				var name:String = elements.selectedItem.@name;
+				var topoName:String = elements.selectedItem.@topoName;
+				if (id == "-1")
+				{
+					// 请选择，不用跳转
+					return;
+				}
+				locateElement(id, name, topoName);
+			}
+
+			// 定位网元(id: 拓扑中唯一id)
+			private function locateElement(id:String, name:String, topoName:String):void
+			{
+				log.debug("定位网元 {0}:{1}@{2}", id, name, topoName);
+				_topoCanvas.locateElement(id, name, topoName, _changeLayerConfirm, null, _locateCallback);
+			}
+		]]>
+	</fx:Script>
+	<s:DropDownList id="elements"
+					width="240"
+					dataProvider="{_elementList}"
+					labelField="@label"
+					selectedIndex="0"
+					close="elements_changeHandler()"/>
+	<mx:Image source="{TopoIcons.delIcon}"
+			  buttonMode="true"
+			  toolTip="关 闭"
+			  click="hide()"/>
+</s:Group>

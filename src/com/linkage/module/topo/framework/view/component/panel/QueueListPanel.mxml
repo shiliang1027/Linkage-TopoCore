@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009" 
+		 xmlns:s="library://ns.adobe.com/flex/spark" 
+		 xmlns:mx="library://ns.adobe.com/flex/mx" 
+		 creationComplete="initPanel()">
+	<s:layout>
+		<s:HorizontalLayout verticalAlign="middle"/>
+	</s:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 元素列表
+			[Bindable]
+			private var _elementList:ArrayCollection = new ArrayCollection();
+			
+			protected function initPanel():void
+			{
+				_elementList.addItem({id:'98', label: '全部'});
+				_elementList.addItem({id:'路由协议', label: '路由协议'});
+				_elementList.addItem({id:'重要集客互联网专线', label: '重要集客互联网专线'});
+				_elementList.addItem({id:'LTE/IMS信令和VoLTE/IMS语音', label: 'LTE/IMS信令和VoLTE/IMS语音'});
+				_elementList.addItem({id:'VoLTE/IMS流媒体', label: 'VoLTE/IMS流媒体'});
+				_elementList.addItem({id:'普通集客互联网专线', label: '普通集客互联网专线'});
+				_elementList.addItem({id:'2G/3G/LTE上网业务', label: '2G/3G/LTE上网业务'});
+				_elementList.addItem({id:'WLAN上网业务', label: 'WLAN上网业务'});
+				_elementList.addItem({id:'家庭宽带上网业务', label: '家庭宽带上网业务'});
+				_elementList.refresh();
+				elements.selectedIndex = 0;
+			}
+			
+			// 元素切换事件
+			private function elements_changeHandler():void
+			{
+				_topoCanvas.extInfo = elements.selectedItem.id;
+			}
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<s:DropDownList id="elements"
+					width="240"
+					selectedIndex="0"
+					dataProvider="{_elementList}"
+					close="elements_changeHandler()"/>
+</s:Group>

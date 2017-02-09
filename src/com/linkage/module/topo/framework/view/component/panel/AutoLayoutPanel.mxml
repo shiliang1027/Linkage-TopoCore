@@ -1,0 +1,1001 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 width="250"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false"
+						 title="自动布局">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.CanvasEvent;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.IElement;
+			import com.linkage.module.topo.framework.core.model.element.point.ITPPoint;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+			
+			import mx.collections.ArrayCollection;
+			import mx.containers.FormItem;
+			import mx.controls.Alert;
+			import mx.managers.PopUpManager;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.AutoLayoutPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			[Bindable]
+			private var _selectedlabel:String = null;
+			// 是否允许提交
+			[Bindable]
+			private var _submitEnabled:Boolean = true;
+			
+			//保存当前存储的布局位置
+			public var backUpperArrayCollection:ArrayCollection = new ArrayCollection();
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+
+				_topoCanvas.removeEventListener(CanvasEvent.SELECTED_CHANGED, selectedChanged_handler);
+				_topoCanvas.removeEventListener(CanvasEvent.LAYER_CHANGED, layerChanged_handler);
+			}
+
+			// 展示元素的信息
+			private function showPanel():void
+			{
+				show();
+
+				_topoCanvas.addEventListener(CanvasEvent.SELECTED_CHANGED, selectedChanged_handler);
+				_topoCanvas.addEventListener(CanvasEvent.LAYER_CHANGED, layerChanged_handler);
+				setLayoutTypeProperty(Constants.LAYOUT_TYPE_SPRING);
+				resetLockStatus();
+			}
+
+			// 普通布局,选中对象变化
+			private function selectedChanged_handler(event:CanvasEvent = null):void
+			{
+				log.info("普通布局,选中对象变化");
+				if (currentState != "commonLayout_element" && currentState != "commonLayout_empty")
+				{
+					return;
+				}
+				if (_topoCanvas.hasFeatureSelected())
+				{
+					_selectedlabel = "选中" + _topoCanvas.selectedNum() + "个网元";
+					currentState = "commonLayout_element";
+				}
+				else
+				{
+					_selectedlabel = "请选择网元";
+					currentState = "commonLayout_empty";
+				}
+			}
+
+			// 拓扑层次变化
+			private function layerChanged_handler(event:CanvasEvent):void
+			{
+				resetLockStatus();
+			}
+
+			private function resetLockStatus():void
+			{
+				_submitEnabled = _topoCanvas.getProperty(Constants.PROPERTY_CANVAS_ISLOCKED) != "true";
+				lockInfo.visible = !_submitEnabled;
+				lockInfo.includeInLayout = !_submitEnabled;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				_topoCanvas.addEventListener(TopoEvent.SHOW_LAYOUT, function(event:TopoEvent):void
+					{
+						if (showStatus)
+						{
+							closePanel();
+						}
+						else
+						{
+							showPanel();
+						}
+					});
+
+				_topoCanvas.addEventListener(TopoEvent.SHOW_SIMPLE_LAYOUT, function(event:TopoEvent):void
+					{
+						showPanel();
+						setLayoutTypeProperty(Constants.LAYOUT_TYPE_COMMON);
+					});
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			// 设置布局方式
+			private function setLayoutTypeProperty(value:String):void
+			{
+				switch (value)
+				{
+					case Constants.LAYOUT_TYPE_CIRCLE:
+						layoutTypeDDL.selectedIndex = 1;
+						break;
+					case Constants.LAYOUT_TYPE_TREE:
+						layoutTypeDDL.selectedIndex = 2;
+						break;
+					case Constants.LAYOUT_TYPE_INVERSETREE:
+						layoutTypeDDL.selectedIndex = 3;
+						break;
+					case Constants.LAYOUT_TYPE_COMMON:
+						layoutTypeDDL.selectedIndex = 4;
+						break;
+					case Constants.LAYOUT_TYPE_SPRING:
+					default:
+						layoutTypeDDL.selectedIndex = 0;
+						break;
+				}
+				layoutType_changeHandler();
+			}
+
+			// 切换布局方式
+			private function layoutType_changeHandler():void
+			{
+
+				switch (layoutTypeDDL.selectedItem.value)
+				{
+					case Constants.LAYOUT_TYPE_CIRCLE:
+						this.currentState = "circleLayout";
+						break;
+					case Constants.LAYOUT_TYPE_TREE:
+						this.currentState = "treeLayout";
+						break;
+					case Constants.LAYOUT_TYPE_INVERSETREE:
+						this.currentState = "inversetreeLayout";
+						break;
+					case Constants.LAYOUT_TYPE_COMMON:
+						this.currentState = "commonLayout_element";
+						selectedChanged_handler();
+						break;
+					case Constants.LAYOUT_TYPE_LEFT:
+						this.currentState = "leftLayout";
+						break;
+					case Constants.LAYOUT_TYPE_RIGHT:
+						this.currentState = "rightLayout";
+						break;
+					case Constants.LAYOUT_TYPE_TOP:
+						this.currentState = "topLayout";
+						break;
+					case Constants.LAYOUT_TYPE_BOTTOM:
+						this.currentState = "bottomLayout";
+						break;
+					case Constants.LAYOUT_TYPE_HC:
+						this.currentState = "hcLayout";
+						break;
+					case Constants.LAYOUT_TYPE_VC:
+						this.currentState = "vcLayout";
+						break;
+					case Constants.LAYOUT_TYPE_SPRING:
+					default:
+						this.currentState = "springLayout";
+						break;
+				}
+			}
+
+			// 表单验证
+			private function checkForm():Boolean
+			{
+				return true;
+			}
+
+			//  对称布局,点击保存按钮
+			private function saveSpring_clickHandler():void
+			{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				var layoutType:String = Constants.LAYOUT_TYPE_SPRING; //layoutTypeDDL.selectedItem.value;
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_LAYOUT_TYPE, layoutType);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+
+				data += DataUtil.buildMapXML("tension", tension.value);
+				data += DataUtil.buildMapXML("stress", stress.value);
+				data += DataUtil.buildMapXML("count", count.value);
+				data = DataUtil.buildXML(Constants.TP_MC_SPRING_LAYOUT, data);
+				log.debug("对称布局: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.loadCurrentTopo();
+						}
+						else
+						{
+							MessageUtil.showMessage("布局失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("布局失败!(通信异常)");
+					});
+			}
+
+			//  树形布局,点击保存按钮
+			private function saveTree_clickHandler():void
+			{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				var layoutType:String = Constants.LAYOUT_TYPE_TREE;
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_LAYOUT_TYPE, layoutType);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_ROWGAP, tree_rowGap.value);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_COLUMNGAP, tree_columnGap.value);
+				data = DataUtil.buildXML(Constants.TP_MC_TREE_LAYOUT, data);
+				log.debug("树形布局: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.loadCurrentTopo();
+						}
+						else
+						{
+							MessageUtil.showMessage("布局失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("布局失败!(通信异常)");
+					});
+			}
+
+			//  倒树布局,点击保存按钮
+			private function saveInverseTree_clickHandler():void
+			{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				var layoutType:String = Constants.LAYOUT_TYPE_INVERSETREE;
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_LAYOUT_TYPE, layoutType);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_ROWGAP, inversetree_rowGap.value);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_COLUMNGAP, inversetree_columnGap.value);
+				data = DataUtil.buildXML(Constants.TP_MC_TREE_LAYOUT, data);
+				log.debug("倒树布局: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.loadCurrentTopo();
+						}
+						else
+						{
+							MessageUtil.showMessage("布局失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("布局失败!(通信异常)");
+					});
+			}
+
+			//  圆形布局,点击保存按钮
+			private function saveCircle_clickHandler():void
+			{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				
+				var layoutType:String = Constants.LAYOUT_TYPE_CIRCLE;
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_LAYOUT_TYPE, layoutType);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_RADIUS, circle_radius.value);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_NODEGAP, circle_nodeGap.value);
+				data += DataUtil.buildMapXML(Constants.XML_KEY_FANANGLE, circle_fanAngle.value);
+				data = DataUtil.buildXML(Constants.TP_MC_CIRCLE_LAYOUT, data);
+				log.debug("圆形布局: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.loadCurrentTopo();
+						}
+						else
+						{
+							MessageUtil.showMessage("布局失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("布局失败!(通信异常)");
+					});
+			}
+
+			//  普通布局点击保存按钮
+			private function saveCommon_clickHandler():void
+			{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+
+				var maxColumnNumValue:Number = maxColumnNum.value;
+				var rowGapValue:Number = rowGap.value;
+				var columnGapValue:Number = columnGap.value;
+
+				// 布局起始点
+				var startX:Number = Number.MAX_VALUE;
+				var startY:Number = Number.MAX_VALUE;
+				// 当前布局点坐标
+				var currentX:Number = startX;
+				var currentY:Number = startY;
+				var num:uint = 0; // 当前布局网元索引
+				var currentRowNum:uint = 0; //当前布局
+
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+					{
+						if (element is ITPPoint)
+						{
+							startX = Math.min(startX, element.feature.x);
+							startY = Math.min(startY, element.feature.y);
+							elements.push({id: id, name: element.name, element: element});
+							tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+						}
+					});
+				elements.sortOn("name");
+				backUpperArrayCollection.addItem(tempArr);
+				elements.forEach(function(item:*, index:int, array:Array):void
+					{
+						if (num % maxColumnNumValue == 0)
+						{
+							currentX = startX;
+							currentY = startY + currentRowNum * rowGapValue;
+							currentRowNum++;
+						}
+						else
+						{
+							currentX += columnGapValue;
+						}
+						(item.element as ITPPoint).feature.setMoveXY(currentX, currentY);
+						num++;
+					});
+
+			}
+			
+			private function saveLeft_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var startX:Number = Number.MAX_VALUE;
+				
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						startX = Math.min(startX, element.feature.x);
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					temp.feature.setMoveXY(startX, temp.feature.y);
+				});
+			}
+			
+			private function saveRight_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var startX:Number = Number.MIN_VALUE;
+				
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						startX = Math.max(startX, element.feature.x);
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					temp.feature.setMoveXY(startX, temp.feature.y);
+				});
+			}
+			private function saveTop_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var startY:Number = Number.MAX_VALUE;
+				
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						startY = Math.min(startY, element.feature.y);
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					temp.feature.setMoveXY(temp.feature.x, startY);
+				});
+			}
+			private function saveBottom_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var startY:Number = Number.MIN_VALUE;
+				
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						startY = Math.max(startY, element.feature.y);
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				backUpperArrayCollection.addItem(tempArr);
+				var length:Number = _topoCanvas.height - startY;
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					temp.feature.setMoveXY(temp.feature.x, startY);
+				});
+			}
+			//水平等间距
+			private function saveHC_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var minX:Number = Number.MAX_VALUE;
+				var maxX:Number = Number.MIN_VALUE;
+				var elements:Array = [];
+				var tempArr:Array = new Array();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						minX = Math.min(minX, element.feature.x);//或去新的Y坐标
+						maxX = Math.max(maxX, element.feature.x);//或去新的Y坐标
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				if(elements.length < 3 || maxX <= minX){
+					return;
+				}
+				backUpperArrayCollection.addItem(tempArr);
+				var width:Number = (maxX - minX)/(elements.length - 1);//间距
+				var _index:Number = 0;
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					if(temp.feature.x != maxX && temp.feature.x != minX){
+						temp.feature.setMoveXY(minX + width + width * _index,temp.feature.y);
+						_index++;
+					}
+				});
+			}
+			//垂直等间距
+			private function saveVC_clickHander():void{
+				if (checkForm() == false)
+				{
+					return;
+				}
+				if (!_topoCanvas.hasFeatureSelected())
+				{
+					return;
+				}
+				// 布局起始点
+				var minY:Number = Number.MAX_VALUE;
+				var maxY:Number = Number.MIN_VALUE;
+				var elements:Array = [];
+				var tempArr:Array = [];//点
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+				{
+					if (element is ITPPoint)
+					{
+						minY = Math.min(minY, element.feature.y);//或去新的Y坐标
+						maxY = Math.max(maxY, element.feature.y);//或去新的Y坐标
+						elements.push({id: id, name: element.name, element: element});
+						tempArr.push({id: id, x: element.feature.x, y: element.feature.y});
+					}
+				});
+				if(elements.length < 3 ||　maxY　<= minY){
+					return;//个数小于3个的不排序
+				}
+				backUpperArrayCollection.addItem(tempArr);
+				var height:Number = (maxY - minY)/(elements.length - 1);//间距
+				var _index:Number = 0;
+				elements.sort(sortFun);
+				elements.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = item.element as ITPPoint;
+					if(temp.feature.y != maxY && temp.feature.y != minY){
+						temp.feature.setMoveXY(temp.feature.x,minY + height + height * _index);
+						_index++;
+					}
+				});
+			}
+			public function sortFun(objA:Object,objB:Object):int{
+				var a:ITPPoint = objA.element as ITPPoint;
+				var b:ITPPoint = objB.element as ITPPoint;
+				if(a.y > b.y){
+					return 1;
+				}else if(a.y == b.y){
+					return 0;
+				}else{
+					return -1;
+				}
+			}
+			
+			//返回上一层布局
+			public function backToUpper():void{
+				if(backUpperArrayCollection.length == 0){
+					return;
+				}
+				//获取上一层保存的坐标数据
+				var target:Array = backUpperArrayCollection.getItemAt(backUpperArrayCollection.length - 1) as Array;
+				target.forEach(function(item:*, index:int, array:Array):void
+				{
+					var temp:ITPPoint = _topoCanvas.findElementById(String(item.id)) as ITPPoint;
+					temp.feature.setMoveXY(Number(item.x),Number(item.y));
+				});
+				backUpperArrayCollection.removeItemAt(backUpperArrayCollection.length - 1);
+			}
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<mx:Form width="100%">
+		<mx:FormItem label="布局方式">
+			<s:DropDownList id="layoutTypeDDL"
+							width="100"
+							change="layoutType_changeHandler()">
+				<s:dataProvider>
+					<s:ArrayList>
+						<fx:Object label="对称布局"
+								   value="{Constants.LAYOUT_TYPE_SPRING}"/>
+						<fx:Object label="圆形布局"
+								   value="{Constants.LAYOUT_TYPE_CIRCLE}"/>
+						<fx:Object label="树形布局"
+								   value="{Constants.LAYOUT_TYPE_TREE}"/>
+						<fx:Object label="倒树布局"
+								   value="{Constants.LAYOUT_TYPE_INVERSETREE}"/>
+						<fx:Object label="左对齐"
+								   value="{Constants.LAYOUT_TYPE_LEFT}"/>
+						<fx:Object label="右对齐"
+								   value="{Constants.LAYOUT_TYPE_RIGHT}"/>
+						<fx:Object label="上对齐"
+								   value="{Constants.LAYOUT_TYPE_TOP}"/>
+						<fx:Object label="下对齐"
+								   value="{Constants.LAYOUT_TYPE_BOTTOM}"/>
+						<fx:Object label="横向等间距"
+								   value="{Constants.LAYOUT_TYPE_HC}"/>
+						<fx:Object label="竖向等间距"
+								   value="{Constants.LAYOUT_TYPE_VC}"/>
+						<fx:Object label="自定义布局"
+								   value="{Constants.LAYOUT_TYPE_COMMON}"/>
+					</s:ArrayList>
+				</s:dataProvider>
+			</s:DropDownList>
+		</mx:FormItem>
+		<s:VGroup width="100%"
+				  includeIn="springLayout">
+			<mx:FormItem label="网元斥力">
+				<s:HSlider id="tension"
+						   width="100"
+						   value="200"
+						   minimum="1"
+						   maximum="500"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="链路张力">
+				<s:HSlider id="stress"
+						   width="100"
+						   value="200"
+						   minimum="1"
+						   maximum="500"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="计算次数">
+				<s:HSlider id="count"
+						   width="100"
+						   value="1000"
+						   minimum="500"
+						   maximum="5000"
+						   stepSize="100"/>
+			</mx:FormItem>
+			<s:HGroup width="100%"
+					  horizontalAlign="center"
+					  gap="20">
+				<s:Button label="确 定"
+						  click="saveSpring_clickHandler()"
+						  enabled="{_submitEnabled}"/>
+				<s:Button label="关 闭"
+						  click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="circleLayout"
+				  width="100%">
+			<!--
+				 <mx:FormItem label="行间隙">
+				 <s:HSlider id="circle_rowGap"
+				 width="100"
+				 value="150"
+				 minimum="50"
+				 maximum="300"
+				 stepSize="1"/>
+				 </mx:FormItem>
+				 <mx:FormItem label="列间隙">
+				 <s:HSlider id="circle_columnGap"
+				 width="100"
+				 value="150"
+				 minimum="50"
+				 maximum="300"
+				 stepSize="1"/>
+				 </mx:FormItem>
+			-->
+			<mx:FormItem label="最小半径">
+				<s:HSlider id="circle_radius"
+						   width="100"
+						   value="300"
+						   minimum="100"
+						   maximum="500"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="最小间隙">
+				<s:HSlider id="circle_nodeGap"
+						   width="100"
+						   value="50"
+						   minimum="10"
+						   maximum="200"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="扇形角度">
+				<s:HSlider id="circle_fanAngle"
+						   width="100"
+						   value="240"
+						   minimum="1"
+						   maximum="360"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<s:HGroup width="100%"
+					  horizontalAlign="center"
+					  gap="20">
+				<s:Button label="确 定"
+						  click="saveCircle_clickHandler()"
+						  enabled="{_submitEnabled}"/>
+				<s:Button label="关 闭"
+						  click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="treeLayout"
+				  width="100%">
+			<mx:FormItem label="行间隙">
+				<s:HSlider id="tree_rowGap"
+						   width="100"
+						   value="150"
+						   minimum="50"
+						   maximum="300"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="列间隙">
+				<s:HSlider id="tree_columnGap"
+						   width="100"
+						   value="150"
+						   minimum="50"
+						   maximum="300"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<s:HGroup width="100%"
+					  horizontalAlign="center"
+					  gap="20">
+				<s:Button label="确 定"
+						  click="saveTree_clickHandler()"
+						  enabled="{_submitEnabled}"/>
+				<s:Button label="关 闭"
+						  click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="inversetreeLayout"
+				  width="100%">
+			<mx:FormItem label="行间隙">
+				<s:HSlider id="inversetree_rowGap"
+						   width="100"
+						   value="150"
+						   minimum="50"
+						   maximum="300"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<mx:FormItem label="列间隙">
+				<s:HSlider id="inversetree_columnGap"
+						   width="100"
+						   value="150"
+						   minimum="50"
+						   maximum="300"
+						   stepSize="1"/>
+			</mx:FormItem>
+			<s:HGroup width="100%"
+					  horizontalAlign="center"
+					  gap="20">
+				<s:Button label="确 定"
+						  click="saveInverseTree_clickHandler()"
+						  enabled="{_submitEnabled}"/>
+				<s:Button label="关 闭"
+						  click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="commonLayout"
+				  width="100%">
+			<mx:FormItem label="布局网元">
+				<s:Label text="{_selectedlabel}"
+						 color.commonLayout_empty="0xff0000"
+						 fontWeight.commonLayout_empty="bold"/>
+			</mx:FormItem>
+			<mx:FormItem label="每行数量">
+				<s:NumericStepper id="maxColumnNum"
+								  width="100"
+								  toolTip="范围: 5 -- 50"
+								  value="10"
+								  maxChars="2"
+								  minimum="5"
+								  maximum="50"
+								  stepSize="5"
+								  snapInterval="1"/>
+
+			</mx:FormItem>
+			<mx:FormItem label="行间距">
+				<s:HSlider id="rowGap"
+						   width="100"
+						   value="100"
+						   minimum="50"
+						   maximum="200"
+						   stepSize="10"/>
+			</mx:FormItem>
+			<mx:FormItem label="列间距">
+				<s:HSlider id="columnGap"
+						   width="100"
+						   value="100"
+						   minimum="50"
+						   maximum="200"
+						   stepSize="10"/>
+			</mx:FormItem>
+			<s:HGroup width="100%"
+					  horizontalAlign="center"
+					  gap="20">
+				<s:Button id="submitBtn"
+						  label="确 定"
+						  click="saveCommon_clickHandler()"
+						  enabled="{_submitEnabled}"/>
+				<s:Button label="关 闭"
+						  click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		
+		<s:VGroup includeIn="leftLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveLeft_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		
+		<s:VGroup includeIn="rightLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveRight_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="topLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveTop_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="bottomLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveBottom_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		<s:VGroup includeIn="hcLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveHC_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		
+		<s:VGroup includeIn="vcLayout" width="100%">
+			<s:HGroup width="100%" horizontalAlign="center" gap="20">
+				<s:Button label="确 定" click="saveVC_clickHander()"/>
+				<s:Button label="关 闭" click="closePanel();"/>
+				<s:Button label="返 回" click="backToUpper();"/>
+			</s:HGroup>
+		</s:VGroup>
+		
+		
+		
+		
+		<s:VGroup width="100%"
+				  id="lockInfo"
+				  visible="false"
+				  includeInLayout="false">
+			<s:Label text="当前层处于锁定状态,不能布局"
+					 color="0xff0000"
+					 fontWeight="bold"/>
+		</s:VGroup>
+	</mx:Form>
+	<panel:states>
+		<s:State name="springLayout"/>
+		<s:State name="circleLayout"/>
+		<s:State name="treeLayout"/>
+		<s:State name="inversetreeLayout"/>
+		<s:State name="commonLayout_empty"
+				 stateGroups="commonLayout"/>
+		<s:State name="commonLayout_element"
+				 stateGroups="commonLayout"/>
+		<s:State name="leftLayout"/>
+		<s:State name="rightLayout"/>
+		<s:State name="topLayout"/>
+		<s:State name="bottomLayout"/>
+		<s:State name="hcLayout"/>
+		<s:State name="vcLayout"/>
+	</panel:states>
+</panel:AbstractCEPWindow>

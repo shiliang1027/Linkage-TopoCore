@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:Window xmlns:fx="http://ns.adobe.com/mxml/2009"
+			  xmlns:s="library://ns.adobe.com/flex/spark"
+			  xmlns:mx="library://ns.adobe.com/flex/mx"
+			  xmlns:panel="com.linkage.system.component.panel.*"
+			  xmlns:tree="com.linkage.system.component.tree.*"
+			  title="拓扑树(双击选择)"
+			  creationComplete="window1_creationCompleteHandler(event)"
+			  width="400"
+			  height="380"
+			  minHeight="24"
+			  dragable="true"
+			  maximizable="false"
+			  close="hide();">
+	<panel:layout>
+		<s:BasicLayout/>
+	</panel:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.assets.TopoIcons;
+			import com.linkage.module.topo.framework.controller.event.TreeLoadEvent;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.ISet;
+			import com.linkage.system.structure.map.Set;
+
+			import mx.collections.ArrayCollection;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.collections.XMLListCollection;
+			import mx.events.FlexEvent;
+			import mx.events.ListEvent;
+			import mx.events.TreeEvent;
+			import mx.managers.PopUpManager;
+
+			// log
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.spareparts.TopoTreeChooser");
+			// 画布
+			[Bindable]
+			private var _topoCanvas:TopoCanvas = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 加载中提示 
+			private static const LOADING_INFO:String = "<Item id='-1' name='加载中,请稍候...' _hasload='true'/>";
+			// 树的拓扑数据
+			[Bindable]
+			private var _topoTreeData:XMLListCollection = new XMLListCollection();
+
+			// 拓扑数据源名称
+			private var _topoName:String = Constants.DEFAULT_TOPONAME;
+			// 拓扑树的顶级pid
+			private var _pid:String = Constants.TOP_PID_ALL;
+			// 获取的子节点层级
+			private var _level:int = 1;
+			// 是否显示root节点
+			[Bindable]
+			private var _showRoot:Boolean = true;
+
+			// 选中图标后回调方法
+			private var _selectedCallback:Function = null;
+
+			// 名称排序对象
+			private var _sort:Sort = new Sort();
+			// 已经排过序的id的缓存
+			private var _sortedCache:ISet = new Set();
+
+			private function window1_creationCompleteHandler(event:FlexEvent):void
+			{
+				_sort.fields = [new SortField("@name")];
+				_topoTreeData.addItem(new XML(LOADING_INFO));
+				// 启动加载数据逻辑
+				_dataSource.loadTopoTree(_topoName, _pid, _level, "", function(data:XML):void
+					{
+						_topoTreeData = initXMLLC(data);
+						_sortedCache.clear();
+						topoTree_defaultShowStatus();
+					});
+
+				topoTree.addEventListener(TreeLoadEvent.TREE_LOAD, function(event:TreeLoadEvent):void
+					{
+						var itemData:XML = event.data;
+						log.debug("handler tree_load event... " + itemData.@name);
+						itemData.setChildren(new XML(LOADING_INFO));
+						topoTree.validateNow();
+						topoTree.expandItem(itemData, true);
+						_dataSource.loadTopoTree(itemData.@toponame, itemData.@id, _level, "", function(data:XML):void
+							{
+								log.debug(data);
+								var children:XMLList = data.children();
+								if (children.length() > 0)
+								{
+									itemData.setChildren(children);
+								}
+								else
+								{
+									removeXMLChildren(itemData);
+								}
+							}, function():void
+							{
+								topoTree.validateNow();
+								topoTree.expandItem(itemData, true);
+							}, function():void
+							{
+								removeXMLChildren(itemData);
+							});
+					});
+			}
+
+			// 清除xml对象的children
+			private function removeXMLChildren(xml:XML):void
+			{
+				log.debug("removeXMLChildren " + xml);
+				var children:XMLList = xml.children();
+				var len:int = children.length();
+				for (var index:int = 0; index < len; index++)
+				{
+					delete children[index];
+				}
+			}
+
+			// XML包括: <Item id='' name='' type='' icon=''/>
+			// 这个方法解决了有事节点无名称显示的bug
+			private function initXMLLC(data:XML):XMLListCollection
+			{
+				var xmllist:XMLList = new XMLList(data);
+				var xmllc:XMLListCollection = new XMLListCollection(xmllist);
+				xmllc.sort = _sort;
+				xmllc.refresh();
+				return xmllc;
+			}
+
+			private function topoTree_defaultShowStatus():void
+			{
+				if (topoTree)
+				{
+					if (_topoTreeData.length > 0)
+					{
+						var rootNode:XML = _topoTreeData.getItemAt(0) as XML;
+						sortXML(rootNode);
+					}
+				}
+				else
+				{
+					setTimeout(topoTree_defaultShowStatus, 500);
+				}
+			}
+
+			/**
+			 * 初始化面板
+			 */
+			public function initPanel(selectedCallback:Function):void
+			{
+				this._selectedCallback = selectedCallback;
+			}
+
+			public function set topoCanvas(value:TopoCanvas):void
+			{
+				_topoCanvas = value;
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 拓扑数据源名称
+			 */
+			public function set topoName(value:String):void
+			{
+				_topoName = value;
+			}
+
+			/**
+			 * 是否显示root节点
+			 */
+			public function set showRoot(value:Boolean):void
+			{
+				_showRoot = value;
+			}
+
+			/**
+			 * 拓扑树顶级pid
+			 */
+			public function set pid(value:String):void
+			{
+				_pid = value;
+			}
+
+			// 选择具体的节点
+			protected function topoTree_itemClickHandler(event:ListEvent):void
+			{
+				log.info("选中节点 " + topoTree.selectedItem);
+				if (topoTree.selectedItem.@id == "-1")
+				{
+					return;
+				}
+//				MessageUtil.confirm("确认选择[" + topoTree.selectedItem.@name + "]?", function():void
+//					{
+//					});
+				_selectedCallback.call(null, topoTree.selectedItem);
+			}
+
+			/**
+			 * 弹出显示面板
+			 */
+			public function show(parent:DisplayObject, modal:Boolean = false):void
+			{
+				PopUpManager.addPopUp(this, parent, modal);
+				PopUpManager.centerPopUp(this);
+				topoTree.selectedItem = null;
+				topoTree_defaultShowStatus();
+			}
+
+			/**
+			 * 隐藏面板
+			 */
+			public function hide():void
+			{
+				PopUpManager.removePopUp(this);
+			}
+
+			private function topoTree_itemOpenHandler(event:TreeEvent):void
+			{
+				var xml:XML = event.item as XML;
+				sortXML(event.item as XML);
+			}
+
+			// 排序XML的一级子
+			private function sortXML(xml:XML):void
+			{
+				var id:String = xml.@id;
+				if (_sortedCache.contains(id))
+				{
+					// 已经缓存过的id,不需要再次排序
+					log.debug("已经缓存过的id(" + id + "),不需要再次排序");
+					return;
+				}
+				_sortedCache.add(id);
+				// 先转换成AC排序
+				var ac:ArrayCollection = new ArrayCollection();
+				for each (var obj:Object in xml.children())
+				{
+					ac.addItem(obj);
+				}
+				ac.sort = _sort;
+				ac.refresh();
+				// 再转换为LC
+				var len:int = ac.length;
+				var xmllc:XMLListCollection = new XMLListCollection();
+				for (var i:int = 0; i < len; i++)
+				{
+					xmllc.addItem(ac.getItemAt(i));
+				}
+				// 最后重置XML的一级子
+				xml.setChildren(xmllc.source);
+
+				// 验证子项布局
+				topoTree.validateNow();
+				topoTree.expandItem(xml, false);
+				topoTree.expandItem(xml, true);
+				topoTree.validateProperties();
+				topoTree.validateDisplayList();
+			}
+		]]>
+	</fx:Script>
+	<s:VGroup paddingLeft="5"
+			  paddingTop="5"
+			  paddingBottom="5"
+			  paddingRight="5"
+			  width="100%"
+			  height="100%">
+		<tree:AutoSizeTree id="topoTree"
+						   itemRenderer="com.linkage.module.topo.framework.view.component.tree.TreeRender"
+						   horizontalScrollPolicy="auto"
+						   verticalScrollPolicy="auto"
+						   width="100%"
+						   height="100%"
+						   contentBackgroundAlpha="0"
+						   borderVisible="false"
+						   labelField="@name"
+						   showRoot="{_showRoot}"
+						   dataProvider="{_topoTreeData}"
+						   disclosureClosedIcon="{TopoIcons.plusSignIcon}"
+						   disclosureOpenIcon="{TopoIcons.minusSignIcon}"
+						   folderClosedIcon="{null}"
+						   folderOpenIcon="{null}"
+						   defaultLeafIcon="{null}"
+						   doubleClickEnabled="true"
+						   itemDoubleClick="topoTree_itemClickHandler(event)"
+						   itemOpen="topoTree_itemOpenHandler(event)">
+		</tree:AutoSizeTree>
+	</s:VGroup>
+</panel:Window>

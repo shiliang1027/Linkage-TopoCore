@@ -1,0 +1,842 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+						 xmlns:s="library://ns.adobe.com/flex/spark"
+						 xmlns:mx="library://ns.adobe.com/flex/mx"
+						 xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+						 minHeight="24"
+						 maxHeight="310"
+						 width="340"
+						 title="{_title}"
+						 close="closePanel()"
+						 dragable="true"
+						 maximizable="false"
+						 xmlns:spareparts="com.linkage.module.topo.framework.view.component.spareparts.*">
+	<panel:layout>
+		<s:VerticalLayout/>
+	</panel:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.IElement;
+			import com.linkage.module.topo.framework.core.model.element.line.ILink;
+			import com.linkage.module.topo.framework.core.model.element.line.Link;
+			import com.linkage.module.topo.framework.core.model.element.plane.ITPPlane;
+			import com.linkage.module.topo.framework.core.model.element.point.ITPPoint;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.TopoUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+			import com.linkage.system.structure.map.ISet;
+			import com.linkage.system.structure.map.Map;
+			import com.linkage.system.structure.map.Set;
+			
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.LinkModifyPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 正在编辑的链路对象(为空代表新增)
+			private var _modifyLink:ILink = null;
+
+			// 链路类型
+			private var _lineType:String = null;
+			// 链路虚实
+			private var _lineSymbol:String = null;
+			// 链路默认状态
+			private var _linkDefaultStatus:String = null;
+
+			// ---------- 批量创建链路 ------------
+			// 链路的起点
+			private var _multLinkStart:IMap = new Map();
+			// 链路的终点
+			private var _multLinkEnd:IMap = new Map();
+
+			/// -------- 当前值 ---------
+			[Bindable]
+			private var _currentLinkBessel2OffsetV:Number = 0;
+			[Bindable]
+			private var poly_location:String="left";
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				// 监听面板的显示/隐藏
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINK_PANEL_SHOW, function(event:TopoEvent):void
+					{
+						showPanel(event);
+					});
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINK_PANEL_HIDE, function(event:TopoEvent):void
+					{
+						closePanel();
+					});
+
+				// 修改链路
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_LINK, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as ILink);
+					});
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINK, function(event:TopoEvent):void
+					{
+						// 创建链路
+						saveCreate(event.getProperty("fromPoint"), event.getProperty("toPoint"));
+					});
+
+				// 批量创建链路
+				_topoCanvas.addEventListener(TopoEvent.SET_AS_LINK_START, function(event:TopoEvent):void
+					{
+						setAsLinkStart();
+					});
+				_topoCanvas.addEventListener(TopoEvent.SET_AS_LINK_END, function(event:TopoEvent):void
+					{
+						setAsLinkEnd();
+					});
+			}
+
+			/**
+			 * 设置批量创建链路的起点
+			 */
+			private function setAsLinkStart():void
+			{
+				_multLinkStart.clear();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+					{
+						if (element is ITPPoint)
+						{
+							_multLinkStart.put(id, element);
+						}
+					});
+			}
+
+			/**
+			 * 设置批量创建链路的终点
+			 */
+			private function setAsLinkEnd():void
+			{
+				_multLinkEnd.clear();
+				_topoCanvas.eachSelect(function(id:String, element:IElement):void
+					{
+						if (element is ITPPoint)
+						{
+							_multLinkEnd.put(id, element);
+						}
+					});
+				if (_multLinkStart.isEmpty() || _multLinkEnd.isEmpty())
+				{
+					MessageUtil.showMessage("缺少起点或者终点网元,不创建链路.");
+					return;
+				}
+
+				MessageUtil.confirm("确认要将起点网元(" + _multLinkStart.size + ")和终点网元(" + _multLinkEnd.size + ")间两两创建链路?", function():void
+					{
+						saveMultCreate(_multLinkStart, _multLinkEnd);
+					});
+			}
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, link:ILink = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开链路面板,开始初始化...");
+
+					// 初始化页面参数
+					linkName.name = "";
+					lineColor.selectedColor = ElementProperties.DEFAULT_LINE_COLOR;
+					lineWidth.value = ElementProperties.DEFAULT_LINE_WIDTH;
+					lineAlpha.value = ElementProperties.DEFAULT_LINE_ALPHA;
+					setLineSymbolProperty(ElementProperties.DEFAULT_LINE_SYMBOL);
+					setLineTypeProperty(ElementProperties.DEFAULT_LINE_TYPE);
+					_currentLinkBessel2OffsetV = ElementProperties.DEFAULT_LINK_BESSEL2_OFFSETV;
+					setLinkFromArrowEnableProperty(false);
+					linkFromArrowHeight.value = ElementProperties.DEFAULT_LINK_ARROW_HEIGHT;
+					linkFromArrowWidth.value = ElementProperties.DEFAULT_LINK_ARROW_WIDTH;
+					setLinkToArrowEnableProperty(false);
+					linkToArrowHeight.value = ElementProperties.DEFAULT_LINK_ARROW_HEIGHT;
+					linkToArrowWidth.value = ElementProperties.DEFAULT_LINK_ARROW_WIDTH;
+					setLinkDefaultStatusProperty(ElementProperties.DEFAULT_LINK_DEFAULT_STATUS);
+					setLinkOpenTypeProperty(ElementProperties.DEFAULT_LINK_OPEN_TYPE);
+					linkOpenOffsetH.value = ElementProperties.DEFAULT_LINK_OPEN_OFFSETH;
+					linkOpenGap.value = ElementProperties.DEFAULT_LINK_OPEN_GAP;
+				}
+				_modifyLink = link;
+				if (_modifyLink)
+				{
+					_title = "编辑链路";
+					this.currentState = "modifyState";
+					linkName.name = _modifyLink.name;
+					lineColor.selectedColor = _modifyLink.lineColor;
+					lineWidth.value = _modifyLink.lineWidth;
+					lineAlpha.value = _modifyLink.lineAlpha;
+					setLineSymbolProperty(_modifyLink.lineSymbol);
+					setLineTypeProperty(_modifyLink.lineType);
+					_currentLinkBessel2OffsetV = _modifyLink.linkBessel2OffsetV;
+					setLinkFromArrowEnableProperty(_modifyLink.linkFromArrowEnable);
+					linkFromArrowHeight.value = _modifyLink.linkFromArrowHeight;
+					linkFromArrowWidth.value = _modifyLink.linkFromArrowWidth;
+					setLinkToArrowEnableProperty(_modifyLink.linkToArrowEnable);
+					linkToArrowHeight.value = _modifyLink.linkToArrowHeight;
+					linkToArrowWidth.value = _modifyLink.linkToArrowWidth;
+					setLinkDefaultStatusProperty(_modifyLink.linkDefaultStatus);
+					setLinkOpenTypeProperty(_modifyLink.linkOpenType);
+					linkOpenOffsetH.value = _modifyLink.linkOpenOffsetH;
+					linkOpenGap.value = _modifyLink.linkOpenGap;
+				}
+				else
+				{
+					_title = "创建链路";
+					this.currentState = "createState";
+				}
+			}
+
+			// 设置链路线虚实的属性值
+			private function setLineSymbolProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LINE_SYMBOL_DASH:
+						lineSymbolRadio_dash.selected = true;
+						lineSymbolRadio_dash_clickHandler();
+						break;
+					case ElementProperties.PROPERTYVALUE_LINE_SYMBOL_SOLID:
+					default:
+						lineSymbolRadio_solid.selected = true;
+						lineSymbolRadio_solid_clickHandler();
+						break;
+				}
+			}
+
+			private function lineSymbolRadio_solid_clickHandler():void
+			{
+				_lineSymbol = ElementProperties.PROPERTYVALUE_LINE_SYMBOL_SOLID;
+			}
+
+
+			private function lineSymbolRadio_dash_clickHandler():void
+			{
+				_lineSymbol = ElementProperties.PROPERTYVALUE_LINE_SYMBOL_DASH;
+			}
+
+			// 设置链路线类型的属性值
+			private function setLineTypeProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LINE_TYPE_BESSEL2:
+						lineTypeRadio_bessel2.selected = true;
+						lineTypeRadio_bessel2_clickHandler();
+						break;
+					case ElementProperties.PROPERTYVALUE_LINE_TYPE_POLY:
+						lineTypeRadio_poly.selected = true;
+						poly_clickHandler();
+						break;
+					case ElementProperties.PROPERTYVALUE_LINE_TYPE_STRAIGHT:
+					default:
+						lineTypeRadio_straight.selected = true;
+						lineTypeRadio_straight_clickHandler();
+						break;
+				}
+			}
+
+			// 选中链路类型: 直线
+			private function lineTypeRadio_straight_clickHandler():void
+			{
+				_lineType = ElementProperties.PROPERTYVALUE_LINE_TYPE_STRAIGHT;
+				TopoUtil.hideUI(formItem_lineType_bessel2);
+				TopoUtil.hideUI(formItem_lineType_poly);
+			}
+
+			// 选中链路类型: 曲线
+			private function lineTypeRadio_bessel2_clickHandler():void
+			{
+				_lineType = ElementProperties.PROPERTYVALUE_LINE_TYPE_BESSEL2;
+				TopoUtil.showUI(formItem_lineType_bessel2);
+			}
+			
+			// 选中链路类型: 折线
+			protected function poly_clickHandler():void
+			{
+				// TODO Auto-generated method stub
+				_lineType = ElementProperties.PROPERTYVALUE_LINE_TYPE_POLY;
+				TopoUtil.showUI(formItem_lineType_poly);
+			}
+
+			// 设置链路起点是否启用属性值
+			private function setLinkFromArrowEnableProperty(enable:Boolean):void
+			{
+				linkFromArrowEnable.selected = enable ? true : false;
+				linkFromArrowEnable_changeHandler();
+			}
+
+			// 设置链路终点是否启用属性值
+			private function setLinkToArrowEnableProperty(enable:Boolean):void
+			{
+				linkToArrowEnable.selected = enable ? true : false;
+				linkToArrowEnable_changeHandler();
+			}
+
+
+			// 起点箭头是否启用
+			private function linkFromArrowEnable_changeHandler():void
+			{
+				if (linkFromArrowEnable.selected)
+				{
+					TopoUtil.showUI(formItem_linkFromArrowHeight);
+					TopoUtil.showUI(formItem_linkFromArrowWidth);
+				}
+				else
+				{
+					TopoUtil.hideUI(formItem_linkFromArrowHeight);
+					TopoUtil.hideUI(formItem_linkFromArrowWidth);
+				}
+			}
+
+			// 终点箭头是否启用
+			private function linkToArrowEnable_changeHandler():void
+			{
+				if (linkToArrowEnable.selected)
+				{
+					TopoUtil.showUI(formItem_linkToArrowHeight);
+					TopoUtil.showUI(formItem_linkToArrowWidth);
+				}
+				else
+				{
+					TopoUtil.hideUI(formItem_linkToArrowHeight);
+					TopoUtil.hideUI(formItem_linkToArrowWidth);
+				}
+			}
+
+			// 设置链路默认状态的属性值
+			private function setLinkDefaultStatusProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LINK_DEFAULT_STATUS_OPEN:
+						linkDefaultStatus_open.selected = true;
+						linkDefaultStatus_open_clickHandler();
+						break;
+					case ElementProperties.PROPERTYVALUE_LINK_DEFAULT_STATUS_CLOSE:
+					default:
+						linkDefaultStatus_close.selected = true;
+						linkDefaultStatus_close_clickHandler();
+						break;
+				}
+			}
+
+			// 选中默认状态: 关闭
+			private function linkDefaultStatus_close_clickHandler():void
+			{
+				_linkDefaultStatus = ElementProperties.PROPERTYVALUE_LINK_DEFAULT_STATUS_CLOSE;
+			}
+
+			// 选中默认状态: 展开
+			private function linkDefaultStatus_open_clickHandler():void
+			{
+				_linkDefaultStatus = ElementProperties.PROPERTYVALUE_LINK_DEFAULT_STATUS_OPEN;
+			}
+
+			// 设置链路展开类型的属性值
+			private function setLinkOpenTypeProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_ARC:
+						linkOpenType.selectedIndex = 1;
+						break;
+					case ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_PARALLEL:
+						linkOpenType.selectedIndex = 2;
+						break;
+					case ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_TRIANGLE:
+					default:
+						linkOpenType.selectedIndex = 0;
+						break;
+				}
+			}
+
+			// 保存按钮点击
+			private function save_clickHandler(event:MouseEvent):void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyLink)
+				{
+					saveModify(_modifyLink);
+				}
+			}
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+				// 检查验证器是否通过
+				return true;
+			}
+
+			// 修改后保存
+			private function saveModify(link:ILink):void
+			{
+				commitFormProperties(link);
+				// 元素变化后,要同步更新样式
+				link.feature.style = _topoCanvas.styleFactory.buildStyle(link);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputLinks([link], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [link.id]);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							link.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改链路失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改链路失败!(通信异常)");
+					});
+			}
+
+			// 新增链路保存
+			private function saveCreate(fromPoint:ITPPoint, toPoint:ITPPoint):void
+			{
+				if (fromPoint == null || toPoint == null)
+				{
+					log.error("saveCreate 创建链路失败,没有两端对象!");
+					return;
+				}
+				var link:ILink = new Link();
+				link.visible = 1;
+				link.fromElement = fromPoint;
+				link.toElement = toPoint;
+				commitFormProperties(link);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputLinks([link], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_LINK, data);
+				log.debug("saveCreate: {0}", data);
+
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+						}
+						else
+						{
+							MessageUtil.showMessage("创建链路失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建链路失败!(通信异常)");
+					});
+			}
+
+			// 批量创建链路
+			private function saveMultCreate(startMap:IMap, endMap:IMap):void
+			{
+				if (startMap.isEmpty() || endMap.isEmpty())
+				{
+					MessageUtil.showMessage("缺少起点或者终点网元,不创建链路.");
+					log.error("saveMultCreate 创建链路失败,没有两端对象!");
+					return;
+				}
+
+				// 构造批量链路
+				var links:Array = [];
+				var linkuid:String = null;
+				var linkuidSet:ISet = new Set();
+				startMap.forEach(function(sid:String, startPoint:ITPPoint):void
+					{
+						endMap.forEach(function(eid:String, endPoint:ITPPoint):void
+							{
+								// 防止链路重复的校验
+								linkuid = sid < eid ? sid + "#" + eid : eid + "#" + sid;
+								if (linkuidSet.contains(linkuid))
+								{
+									return;
+								}
+								linkuidSet.add(linkuid);
+								// 验证通过,创建链路
+								var link:ILink = new Link();
+								link.visible = 1;
+								link.fromElement = startPoint;
+								link.toElement = endPoint;
+								commitFormProperties(link);
+								links.push(link);
+							});
+					});
+				if (links.length == 0)
+				{
+					log.error("saveMultCreate 自己连自己,不创建链路");
+					MessageUtil.showMessage("起点和终点网元相同,不创建链路.");
+					return;
+				}
+
+				// == TEST ==
+				// 由于茂才那边代码暂不支持,先临时按顺序一个一个添加链路
+				doCreateLink(links);
+				return;
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputLinks(links, _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_LINK, data);
+				log.debug("saveMultCreate: {0}", data);
+
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+						}
+						else
+						{
+							MessageUtil.showMessage("创建链路失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建链路失败!(通信异常)");
+					});
+			}
+
+			// 顺序执行创建链路的方法,直到数组中的链路都被创建完成
+			private function doCreateLink(links:Array):void
+			{
+				_loading.loadingStart();
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputLinks([links.shift()], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_LINK, data);
+				log.debug("doCreateLink: {0}", data);
+
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+						}
+					}, function():void
+					{
+						if (links.length > 0)
+						{
+							doCreateLink(links);
+						}
+						else
+						{
+							_loading.loadingEnd();
+						}
+					});
+			}
+
+			// 提交页面上的属性到对象中
+			private function commitFormProperties(link:ILink):void
+			{
+				// 基本属性
+				link.name = StringUtil.trim(linkName.text);
+				link.lineColor = lineColor.selectedColor;
+				link.lineWidth = lineWidth.value;
+				link.lineAlpha = lineAlpha.value;
+				link.lineType = _lineType;
+				link.lineSymbol = _lineSymbol;
+				if (linkBessel2OffsetV)
+				{
+					link.linkBessel2OffsetV = linkBessel2OffsetV.value;
+				}
+				if (poly_location)
+				{
+					link.poly_location = poly_location;
+				}
+				// 箭头属性
+				link.linkFromArrowEnable = linkFromArrowEnable.selected;
+				link.linkFromArrowHeight = linkFromArrowHeight.value;
+				link.linkFromArrowWidth = linkFromArrowWidth.value;
+				link.linkToArrowEnable = linkToArrowEnable.selected;
+				link.linkToArrowHeight = linkToArrowHeight.value;
+				link.linkToArrowWidth = linkToArrowWidth.value;
+				// 展开状态
+				link.linkDefaultStatus = _linkDefaultStatus;
+				link.linkOpenType = linkOpenType.selectedItem.value;
+				link.linkOpenOffsetH = linkOpenOffsetH.value;
+				link.linkOpenGap = linkOpenGap.value;
+			}
+		
+			
+		]]>
+	</fx:Script>
+	<s:Scroller width="100%"
+				height="100%">
+		<s:Group width="100%">
+			<mx:Form width="100%">
+				<mx:FormHeading label="基本属性"/>
+				<mx:FormItem label="名称">
+					<s:TextInput id="linkName"
+								 width="120"/>
+				</mx:FormItem>
+				<mx:FormItem label="颜色">
+					<mx:ColorPicker id="lineColor"/>
+				</mx:FormItem>
+				<mx:FormItem label="粗细">
+					<s:NumericStepper id="lineWidth"
+									  width="120"
+									  toolTip="范围: 1 -- 20"
+									  maxChars="2"
+									  minimum="1"
+									  maximum="20"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="透明度">
+					<s:HSlider id="lineAlpha"
+							   width="120"
+							   minimum="0"
+							   maximum="1"
+							   stepSize="0.1"/>
+				</mx:FormItem>
+				<mx:FormItem label="链路虚实">
+					<s:HGroup gap="20">
+						<s:RadioButton groupName="lineSymbolRadio"
+									   id="lineSymbolRadio_solid"
+									   label="实线"
+									   click="lineSymbolRadio_solid_clickHandler()"/>
+						<s:RadioButton groupName="lineSymbolRadio"
+									   id="lineSymbolRadio_dash"
+									   label="虚线"
+									   click="lineSymbolRadio_dash_clickHandler()"/>
+					</s:HGroup>
+				</mx:FormItem>
+				<mx:FormItem label="链路类型">
+					<s:HGroup gap="20">
+						<s:RadioButton groupName="lineTypeRadio"
+									   id="lineTypeRadio_straight"
+									   label="直线"
+									   click="lineTypeRadio_straight_clickHandler()"/>
+						<s:RadioButton groupName="lineTypeRadio"
+									   id="lineTypeRadio_bessel2"
+									   label="曲线"
+									   click="lineTypeRadio_bessel2_clickHandler()"/>
+						<s:RadioButton groupName="lineTypeRadio"
+									   id="lineTypeRadio_poly"
+									   label="折线"
+									   click="poly_clickHandler()"/>
+					</s:HGroup>
+				</mx:FormItem>
+				<mx:FormItem label="曲线偏移量"
+							 id="formItem_lineType_bessel2"
+							 visible="false"
+							 includeInLayout="false">
+					<s:NumericStepper id="linkBessel2OffsetV"
+									  width="120"
+									  toolTip="范围: -100 -- 100"
+									  maxChars="4"
+									  minimum="-100"
+									  maximum="100"
+									  stepSize="10"
+									  allowValueWrap="false"
+									  value="{_currentLinkBessel2OffsetV}"/>
+				</mx:FormItem>
+				<mx:FormItem label="折线方向"
+							 id="formItem_lineType_poly"
+							 visible="false"
+							 includeInLayout="false">
+					<s:RadioButton groupName="lineType_polyRadio" value="left"
+								   label="左" selected="true"
+								   click="{poly_location='left'}"/>
+					<s:RadioButton groupName="lineType_polyRadio" value="right"
+								   label="右"
+								   click="{poly_location='right'}"/>
+				</mx:FormItem>
+				<mx:FormHeading label="箭头属性"/>
+				<mx:FormItem label="起点箭头">
+					<s:CheckBox label="启用"
+								id="linkFromArrowEnable"
+								change="linkFromArrowEnable_changeHandler()"/>
+				</mx:FormItem>
+				<mx:FormItem label="箭头高度"
+							 id="formItem_linkFromArrowHeight"
+							 visible="false"
+							 includeInLayout="false">
+					<s:NumericStepper id="linkFromArrowHeight"
+									  width="120"
+									  toolTip="范围: 5 -- 50"
+									  maxChars="2"
+									  minimum="5"
+									  maximum="50"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="箭头宽度"
+							 id="formItem_linkFromArrowWidth"
+							 visible="false"
+							 includeInLayout="false">
+					<s:NumericStepper id="linkFromArrowWidth"
+									  width="120"
+									  toolTip="范围: 5 -- 50"
+									  maxChars="2"
+									  minimum="5"
+									  maximum="50"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="终点箭头">
+					<s:CheckBox label="启用"
+								id="linkToArrowEnable"
+								change="linkToArrowEnable_changeHandler()"/>
+				</mx:FormItem>
+				<mx:FormItem label="箭头高度"
+							 id="formItem_linkToArrowHeight"
+							 visible="false"
+							 includeInLayout="false">
+					<s:NumericStepper id="linkToArrowHeight"
+									  width="120"
+									  toolTip="范围: 10 -- 50"
+									  maxChars="2"
+									  minimum="5"
+									  maximum="50"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="箭头宽度"
+							 id="formItem_linkToArrowWidth"
+							 visible="false"
+							 includeInLayout="false">
+					<s:NumericStepper id="linkToArrowWidth"
+									  width="120"
+									  toolTip="范围: 10 -- 50"
+									  maxChars="2"
+									  minimum="5"
+									  maximum="50"
+									  stepSize="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormHeading label="展开属性"/>
+				<mx:FormItem label="默认状态">
+					<s:HGroup gap="20">
+						<s:RadioButton groupName="linkDefaultStatusRadio"
+									   id="linkDefaultStatus_close"
+									   label="收起"
+									   click="linkDefaultStatus_close_clickHandler()"/>
+						<s:RadioButton groupName="linkDefaultStatusRadio"
+									   id="linkDefaultStatus_open"
+									   label="展开"
+									   click="linkDefaultStatus_open_clickHandler()"/>
+					</s:HGroup>
+				</mx:FormItem>
+				<mx:FormItem label="展开拐点类型">
+					<s:DropDownList id="linkOpenType"
+									width="120"
+									selectedIndex="0">
+						<s:dataProvider>
+							<s:ArrayList>
+								<fx:Object label="直连"
+										   value="{ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_TRIANGLE}"/>
+								<fx:Object label="圆弧"
+										   value="{ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_ARC}"/>
+								<fx:Object label="无连线"
+										   value="{ElementProperties.PROPERTYVALUE_LINK_OPEN_TYPE_PARALLEL}"/>
+							</s:ArrayList>
+						</s:dataProvider>
+					</s:DropDownList>
+				</mx:FormItem>
+				<mx:FormItem label="拐点偏移距离">
+					<s:NumericStepper id="linkOpenOffsetH"
+									  width="120"
+									  toolTip="范围: 1 -- 50"
+									  maxChars="2"
+									  minimum="1"
+									  maximum="50"
+									  stepSize="1"
+									  snapInterval="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+				<mx:FormItem label="展开间隙">
+					<s:NumericStepper id="linkOpenGap"
+									  width="120"
+									  toolTip="范围: 1 -- 50"
+									  maxChars="2"
+									  minimum="1"
+									  maximum="50"
+									  stepSize="1"
+									  snapInterval="1"
+									  allowValueWrap="false"/>
+				</mx:FormItem>
+			</mx:Form>
+		</s:Group>
+	</s:Scroller>
+	<s:HGroup width="100%"
+			  horizontalAlign="center"
+			  gap="20"
+			  includeIn="modifyState">
+		<s:Button id="submitBtn"
+				  label="确 定"
+				  click="save_clickHandler(event)"/>
+		<s:Button label="关 闭"
+				  click="closePanel();"/>
+	</s:HGroup>
+	<panel:states>
+		<s:State name="createState"/>
+		<s:State name="modifyState"/>
+	</panel:states>
+</panel:AbstractCEPWindow>

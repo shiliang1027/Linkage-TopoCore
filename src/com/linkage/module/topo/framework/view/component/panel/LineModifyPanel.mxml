@@ -1,0 +1,394 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:AbstractCEPWindow xmlns:fx="http://ns.adobe.com/mxml/2009"
+			  xmlns:s="library://ns.adobe.com/flex/spark"
+			  xmlns:mx="library://ns.adobe.com/flex/mx"
+			  xmlns:panel="com.linkage.module.topo.framework.view.component.*"
+			  xmlns:spareparts="com.linkage.module.topo.framework.view.component.spareparts.*"
+			  minHeight="24"
+			  maxHeight="350"
+			  width="320"
+			  title="{_title}"
+			  close="closePanel()"
+			  dragable="true"
+			  maximizable="false"
+			  >
+	<panel:layout>
+		<s:VerticalLayout gap="0"/>
+	</panel:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.Constants;
+			import com.linkage.module.topo.framework.controller.action.canvas.CreateLineAction;
+			import com.linkage.module.topo.framework.controller.event.TopoEvent;
+			import com.linkage.module.topo.framework.core.model.element.line.ITPLine;
+			import com.linkage.module.topo.framework.core.model.element.line.TPLine;
+			import com.linkage.module.topo.framework.core.parser.ElementProperties;
+			import com.linkage.module.topo.framework.data.IDataSource;
+			import com.linkage.module.topo.framework.util.DataUtil;
+			import com.linkage.module.topo.framework.util.MessageUtil;
+			import com.linkage.module.topo.framework.util.loading.ILoadingInfo;
+			import com.linkage.module.topo.framework.util.loading.LoadingManager;
+			import com.linkage.module.topo.framework.view.component.ICanvasExtendPanel;
+			import com.linkage.module.topo.framework.view.component.TopoCanvas;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import com.linkage.system.structure.map.IMap;
+			
+			import mx.binding.utils.BindingUtils;
+			import mx.utils.StringUtil;
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.LineModifyPanel");
+			// loading
+			private var _loading:ILoadingInfo = null;
+
+			// 是否已经创建完成
+			private var _creationComplete:Boolean = false;
+			[Bindable]
+			private var _title:String = null;
+			// 数据源
+			private var _dataSource:IDataSource = null;
+			// 正在编辑的链路对象(为空代表新增)
+			private var _modifyLine:ITPLine = null;
+
+			// 链路类型(暂不支持)
+			private var _lineType:String = null;
+			// 链路虚实
+			[Bindable]
+			private var _lineSymbol:String = ElementProperties.DEFAULT_LINE_SYMBOL;
+
+			// 创建线的Action
+			private var _createLineAction:CreateLineAction = null;
+
+
+			/// -------- 当前值 ---------
+
+			// 关闭面板
+			private function closePanel():void
+			{
+				hide();
+			}
+
+			/**
+			 * 注入数据源
+			 */
+			public function set dataSource(value:IDataSource):void
+			{
+				_dataSource = value;
+			}
+
+			/**
+			 * 注入画布
+			 */
+			override public function set topoCanvas(value:TopoCanvas):void
+			{
+				super.topoCanvas = value;
+				_loading = LoadingManager.getInstance().loadingInfo;
+
+				// 监听面板的显示/隐藏
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINE_PANEL_SHOW, function(event:TopoEvent):void
+					{
+						showPanel(event);
+					});
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINE_PANEL_HIDE, function(event:TopoEvent):void
+					{
+						closePanel();
+					});
+
+				// 修改链路
+				_topoCanvas.addEventListener(TopoEvent.MODIFY_LINE, function(event:TopoEvent):void
+					{
+						showPanel(event, event.feature.element as ITPLine);
+					});
+				_topoCanvas.addEventListener(TopoEvent.CREATE_LINE, function(event:TopoEvent):void
+					{
+						// 创建线对象(CreateLineAction 中调用过来)
+						saveCreate(event.getProperty("points"));
+					});
+
+			}
+
+
+			// 展示元素的信息
+			private function showPanel(event:TopoEvent, line:ITPLine = null):void
+			{
+				show();
+				if (_creationComplete == false)
+				{
+					_creationComplete = true;
+					log.debug("首次打开线对象面板,开始初始化...");
+
+					// 取出创建线对象的模式
+					_createLineAction = CreateLineAction.getInstance(_topoCanvas);
+					BindingUtils.bindProperty(_createLineAction, "createLineColor", lineColor, "selectedColor");
+					BindingUtils.bindProperty(_createLineAction, "createLineThickness", lineWidth, "value");
+					BindingUtils.bindProperty(_createLineAction, "createLineAlpha", lineAlpha, "value");
+
+
+					// 初始化页面参数
+					lineName.text = "";
+					lineColor.selectedColor = ElementProperties.DEFAULT_LINE_COLOR;
+					lineWidth.value = ElementProperties.DEFAULT_LINE_WIDTH;
+					lineAlpha.value = ElementProperties.DEFAULT_LINE_ALPHA;
+					setLineSymbolProperty(ElementProperties.DEFAULT_LINE_SYMBOL);
+				}
+				_modifyLine = line;
+				if (_modifyLine)
+				{
+					_title = "编辑线对象";
+					this.currentState = "modifyState";
+					lineName.text = _modifyLine.name;
+					lineColor.selectedColor = _modifyLine.lineColor;
+					lineWidth.value = _modifyLine.lineWidth;
+					lineAlpha.value = _modifyLine.lineAlpha;
+					setLineSymbolProperty(_modifyLine.lineSymbol);
+				}
+				else
+				{
+					_title = "创建线对象";
+					this.currentState = "createState";
+
+				}
+			}
+
+			// 设置链路线虚实的属性值
+			private function setLineSymbolProperty(value:String):void
+			{
+				switch (value)
+				{
+					case ElementProperties.PROPERTYVALUE_LINE_SYMBOL_DASH:
+						lineSymbolRadio_dash.selected = true;
+						lineSymbolRadio_dash_clickHandler();
+						break;
+					case ElementProperties.PROPERTYVALUE_LINE_SYMBOL_SOLID:
+					default:
+						lineSymbolRadio_solid.selected = true;
+						lineSymbolRadio_solid_clickHandler();
+						break;
+				}
+			}
+
+			private function lineSymbolRadio_solid_clickHandler():void
+			{
+				_lineSymbol = ElementProperties.PROPERTYVALUE_LINE_SYMBOL_SOLID;
+				_createLineAction.createLineSymbol = _lineSymbol;
+			}
+
+			private function lineSymbolRadio_dash_clickHandler():void
+			{
+				_lineSymbol = ElementProperties.PROPERTYVALUE_LINE_SYMBOL_DASH;
+				_createLineAction.createLineSymbol = _lineSymbol;
+			}
+
+
+			// 保存按钮点击
+			private function save_clickHandler(event:MouseEvent):void
+			{
+				if (!checkForm())
+				{
+					return;
+				}
+				if (_modifyLine)
+				{
+					saveModify(_modifyLine);
+				}
+			}
+
+			// 验证表单
+			private function checkForm():Boolean
+			{
+				// 检查验证器是否通过
+				return true;
+			}
+
+			// 修改后保存
+			private function saveModify(line:ITPLine):void
+			{
+				commitFormProperties(line);
+				// 元素变化后,要同步更新样式
+				line.feature.style = _topoCanvas.styleFactory.buildStyle(line);
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([line], _topoCanvas.parserFactory));
+				data += DataUtil.buildListXML(Constants.XML_KEY_ID, [line.id]);
+				data = DataUtil.buildXML(Constants.TP_MC_MODIFY_ELEMENTS, data);
+
+				log.debug("saveModify: {0}", data);
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							line.feature.refresh();
+							closePanel();
+						}
+						else
+						{
+							MessageUtil.showMessage("修改线对象失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("修改线对象失败!(通信异常)");
+					});
+			}
+
+			// 新增链路保存
+			private function saveCreate(points:Array):void
+			{
+				if (points == null || points.length < 2)
+				{
+					log.error("saveCreate 创建链路失败,没有点对象或缺少点对象! " + points);
+					return;
+				}
+				// 先取出点
+				var firstPoint:Point = points.shift();
+				var lastPoint:Point = points.pop();
+				var flexPoints:Array = points;
+				// --- 再根据自身坐标点修正坐标 ---
+				// 第一个点作为线的坐标点,后面的点都要做偏移
+				lastPoint.offset(-firstPoint.x, -firstPoint.y);
+				flexPoints.forEach(function(item:Point, index:int, array:Array):void
+					{
+						item.offset(-firstPoint.x, -firstPoint.y);
+					});
+				// 第一个点修正为入库保存的点坐标
+				firstPoint.offset(-_topoCanvas.dataBounds.offsetX, -_topoCanvas.dataBounds.offsetY);
+				// --- 坐标修正完毕 ---
+				var line:ITPLine = new TPLine();
+				line.visible = 1;
+				line.x = firstPoint.x;
+				line.y = firstPoint.y;
+				line.fromPoint = new Point(0, 0);
+				line.toPoint = lastPoint;
+				line.flexPoints = flexPoints;
+				commitFormProperties(line);
+
+
+				var data:String = DataUtil.buildMapXML(Constants.XML_KEY_ELEMENTXML, DataUtil.buildOutputObjects([line], _topoCanvas.parserFactory));
+				data += DataUtil.buildMapXML(Constants.XML_KEY_PID, _topoCanvas.topoId);
+				data = DataUtil.buildXML(Constants.TP_MC_ADD_OBJECT, data);
+				log.debug("saveCreate: {0}", data);
+
+				_loading.loadingStart();
+				_dataSource.notify(_topoCanvas.topoName, data, function(result:String):void
+					{
+						_loading.loadingEnd();
+						var map:IMap = DataUtil.getActionResultMap(new XML(result));
+						if (map.get(Constants.XML_KEY_SUCCESS) == "1")
+						{
+							_topoCanvas.addDataXML(new XML(map.get(Constants.XML_KEY_ELEMENTXML)));
+						}
+						else
+						{
+							MessageUtil.showMessage("创建线对象失败!\n\n(" + map.get(Constants.XML_KEY_MSG) + ")");
+						}
+
+					}, function():void
+					{
+						_loading.loadingEnd();
+					}, function():void
+					{
+						MessageUtil.showMessage("创建线对象失败!(通信异常)");
+					});
+			}
+
+			// 提交页面上的属性到对象中
+			private function commitFormProperties(line:ITPLine):void
+			{
+				// 基本属性
+				line.name = StringUtil.trim(lineName.text);
+				line.lineColor = lineColor.selectedColor;
+				line.lineWidth = lineWidth.value;
+				line.lineAlpha = lineAlpha.value;
+				line.lineSymbol = _lineSymbol;
+			}
+
+			// 取消当前绘制中全部的店
+			private function cancelAllPoints_clickHandler():void
+			{
+				_createLineAction.clearAllPoints();
+			}
+
+			// 取消当前绘制中前一步的点
+			private function cancelLastPoint_clickHandler():void
+			{
+				_createLineAction.clearLastPoint();
+			}
+		]]>
+	</fx:Script>
+	<s:Group width="100%">
+		<mx:Form width="100%">
+			<mx:FormHeading label="基本属性"/>
+			<mx:FormItem label="名称">
+				<s:TextInput id="lineName"
+							 width="120"/>
+			</mx:FormItem>
+			<mx:FormItem label="颜色">
+				<mx:ColorPicker id="lineColor"/>
+			</mx:FormItem>
+			<mx:FormItem label="粗细">
+				<s:NumericStepper id="lineWidth"
+								  width="120"
+								  toolTip="范围: 1 -- 20"
+								  maxChars="2"
+								  minimum="1"
+								  maximum="20"
+								  stepSize="1"
+								  allowValueWrap="false"/>
+			</mx:FormItem>
+			<mx:FormItem label="透明度">
+				<s:HSlider id="lineAlpha"
+						   width="120"
+						   minimum="0"
+						   maximum="1"
+						   stepSize="0.1"/>
+			</mx:FormItem>
+			<mx:FormItem label="链路虚实">
+				<s:HGroup gap="20"
+						  width="100%">
+					<s:RadioButton groupName="lineSymbolRadio"
+								   id="lineSymbolRadio_solid"
+								   label="实线"
+								   click="lineSymbolRadio_solid_clickHandler()"/>
+					<s:RadioButton groupName="lineSymbolRadio"
+								   id="lineSymbolRadio_dash"
+								   label="虚线"
+								   click="lineSymbolRadio_dash_clickHandler()"/>
+				</s:HGroup>
+			</mx:FormItem>
+		</mx:Form>
+	</s:Group>
+	<s:HGroup width="100%"
+			  horizontalAlign="center"
+			  gap="20"
+			  includeIn="modifyState">
+		<s:Button id="submitBtn"
+				  label="确 定"
+				  click="save_clickHandler(event)"/>
+		<s:Button label="关 闭"
+				  click="closePanel();"/>
+	</s:HGroup>
+	<s:VGroup width="100%"
+			  horizontalAlign="center"
+			  gap="10"
+			  includeIn="createState">
+		<s:Label text="单击设定路径点,双击设定终点"/>
+		<s:HGroup width="100%"
+				  horizontalAlign="center">
+			<s:Button label="取消前一步"
+					  click="cancelLastPoint_clickHandler()"/>
+			<s:Button label="取消全部"
+					  click="cancelAllPoints_clickHandler()"/>
+		</s:HGroup>
+	</s:VGroup>
+	<panel:states>
+		<s:State name="createState"/>
+		<s:State name="modifyState"/>
+	</panel:states>
+</panel:AbstractCEPWindow>

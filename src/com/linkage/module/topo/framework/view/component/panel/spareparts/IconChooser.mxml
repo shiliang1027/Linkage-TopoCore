@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<panel:Window xmlns:fx="http://ns.adobe.com/mxml/2009"
+			  xmlns:s="library://ns.adobe.com/flex/spark"
+			  xmlns:mx="library://ns.adobe.com/flex/mx"
+			  xmlns:panel="com.linkage.system.component.panel.*"
+			  width="390"
+			  height="300"
+			  minHeight="24"
+			  title="请选择图标"
+			  dragable="true"
+			  maximizable="false"
+			  creationComplete="window1_creationCompleteHandler(event)"
+			  close="hide()">
+	<panel:layout>
+		<s:BasicLayout/>
+	</panel:layout>
+	<fx:Declarations>
+		<!-- 将非可视元素（例如服务、值对象）放在此处 -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.linkage.module.topo.framework.util.ImageBuffer;
+			import com.linkage.system.component.panel.events.WindowEvent;
+
+			import mx.collections.ArrayCollection;
+			import mx.collections.IList;
+			import mx.collections.Sort;
+			import mx.collections.SortField;
+			import mx.controls.Image;
+			import mx.events.FlexEvent;
+			import com.linkage.system.logging.ILogger;
+			import com.linkage.system.logging.Log;
+			import mx.managers.PopUpManager;
+
+			import spark.events.IndexChangeEvent;
+
+			private var log:ILogger = Log.getLogger("com.linkage.module.topo.framework.view.component.panel.spareparts.IconChooser");
+			// 图标缓存类
+			private var _imageBuffer:ImageBuffer = ImageBuffer.getInstance();
+
+			// 图标列表
+			[Bindable]
+			private var _iconList:IList = null;
+			// 图标上下文
+			[Bindable]
+			private var _iconContext:String = null;
+			// 图标数据源列表
+			[Bindable]
+			private var _iconImageList:ArrayCollection = new ArrayCollection();
+			// 选中图标后回调方法
+			private var _selectedCallback:Function = null;
+
+			private function window1_creationCompleteHandler(event:FlexEvent):void
+			{
+				var sort:Sort = new Sort();
+				sort.fields = [new SortField("name")];
+				_iconImageList.sort = sort;
+				_iconImageList.refresh();
+			}
+
+			/**
+			 * 初始化面板
+			 */
+			public function initPanel(selectedCallback:Function):void
+			{
+				this._selectedCallback = selectedCallback;
+			}
+
+			/**
+			 * 注入图标上下文
+			 */
+			public function set iconContext(value:String):void
+			{
+				_iconContext = value;
+			}
+
+			/**
+			 * 注入图标列表
+			 */
+			public function set iconList(value:IList):void
+			{
+				_iconList = value;
+
+				log.debug("图标列表 {0}", _iconList);
+
+				_iconImageList.removeAll();
+
+				for each (var item:*in _iconList)
+				{
+					_imageBuffer.loadBitmapData(_iconContext + "/" + item.@v, function(bitmapData:BitmapData, width:Number, height:Number):void
+						{
+							_iconImageList.addItem({bitmapData: bitmapData, width: width, height: height, name: this.@k, icon: this.@v});
+						}, item);
+				}
+			}
+
+			protected function showList_changeHandler(event:IndexChangeEvent):void
+			{
+				log.debug("showList_changeHandler {0} -> {1}", event.oldIndex, event.newIndex);
+
+				var selectedItem:Object = showList.selectedItem;
+				log.debug("选中图标: {0} {1}", selectedItem.name, selectedItem.icon);
+				_selectedCallback.call(null, selectedItem);
+			}
+
+			/**
+			 * 弹出显示面板
+			 */
+			public function show(parent:DisplayObject, modal:Boolean = false):void
+			{
+				PopUpManager.addPopUp(this, parent, modal);
+				PopUpManager.centerPopUp(this);
+				showList.selectedItem = null;
+			}
+
+			/**
+			 * 隐藏面板
+			 */
+			public function hide():void
+			{
+				PopUpManager.removePopUp(this);
+			}
+		]]>
+	</fx:Script>
+	<s:List id="showList"
+			width="100%"
+			height="100%"
+			dataProvider="{_iconImageList}"
+			contentBackgroundAlpha="0"
+			change="showList_changeHandler(event)"
+			itemRenderer="com.linkage.module.topo.framework.view.component.panel.spareparts.IconChooserRenderer">
+		<s:layout>
+			<s:TileLayout/>
+		</s:layout>
+	</s:List>
+</panel:Window>
